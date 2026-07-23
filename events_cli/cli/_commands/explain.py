@@ -1,7 +1,7 @@
 """``events explain <path>...`` — global markdown catalog lookup (stable-contract).
 
 ``explain`` is global (not nested under a noun). It takes zero or more path
-tokens and resolves them via the catalog in :mod:`events.explain`.
+tokens and resolves them via the catalog in :mod:`events_cli.explain`.
 Unknown paths raise :class:`CliError` with a remediation hint.
 """
 
@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import argparse
 
-from events.cli._output import emit_result
-from events.explain import resolve
+from events_cli.cli._output import emit_result
+from events_cli.explain import resolve
 
 
 def cmd_explain(args: argparse.Namespace) -> int:

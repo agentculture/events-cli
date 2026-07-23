@@ -1,7 +1,7 @@
 """CliError and exit-code policy (stable-contract).
 
 Every failure inside events-cli raises :class:`CliError`. The
-top-level ``main()`` catches it, formats via :mod:`events.cli._output`,
+top-level ``main()`` catches it, formats via :mod:`events_cli.cli._output`,
 and exits with :attr:`CliError.code`. This guarantees:
 
 * no Python traceback leaks to stderr (the agent-first error contract);

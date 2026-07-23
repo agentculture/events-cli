@@ -7,9 +7,9 @@ import sys
 
 import pytest
 
-from events import __version__
-from events.cli import main
-from events.explain import known_paths
+from events_cli import __version__
+from events_cli.cli import main
+from events_cli.explain import known_paths
 
 
 def test_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
@@ -137,16 +137,16 @@ def test_explain_root_keys_both_resolve_to_same_entry(
 
 
 def _package_main() -> str:
-    """Path `python -m events` puts in argv[0] — this package's __main__.py.
+    """Path `python -m events_cli` puts in argv[0] — this package's __main__.py.
 
     Not any __main__.py: `python -m pytest` has one too, which is exactly the
     false positive the resolver must not trip on.
     """
     from pathlib import Path
 
-    import events
+    import events_cli
 
-    return str(Path(events.__file__).resolve().parent / "__main__.py")
+    return str(Path(events_cli.__file__).resolve().parent / "__main__.py")
 
 
 def test_prog_matches_installed_console_script() -> None:
@@ -161,7 +161,7 @@ def test_prog_matches_installed_console_script() -> None:
     import tomllib
     from pathlib import Path
 
-    from events.cli import _build_parser
+    from events_cli.cli import _build_parser
 
     pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
     if not pyproject.is_file():  # pragma: no cover - wheel install, no source tree
@@ -175,20 +175,20 @@ def test_prog_matches_installed_console_script() -> None:
 def test_prog_names_module_invocation_when_run_as_module(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Under ``python -m events`` the hints must name *that*, not the script.
+    """Under ``python -m events_cli`` the hints must name *that*, not the script.
 
     The documented no-install fallback runs from a checkout, where the ``events``
     console script is typically absent — so a hint saying ``run 'events --help'``
     would name a command the caller cannot run.
     """
-    import events
-    from events.cli import _build_parser
-    from events.cli._prog import prog_name
+    import events_cli
+    from events_cli.cli import _build_parser
+    from events_cli.cli._prog import prog_name
 
     monkeypatch.setattr(sys, "argv", [_package_main(), "bogus"])
-    assert prog_name() == "python -m events"
-    assert _build_parser().prog == "python -m events"
-    assert events  # the package under test is importable by that path
+    assert prog_name() == "python -m events_cli"
+    assert _build_parser().prog == "python -m events_cli"
+    assert events_cli  # the package under test is importable by that path
 
     # A *different* module's __main__.py must not trip it — `python -m pytest`
     # is itself one, so a basename check would report module mode for every
@@ -206,8 +206,62 @@ def test_remediation_hints_name_the_active_invocation(
     # argparse parse error (routed through _CliArgumentParser.error).
     with pytest.raises(SystemExit):
         main(["cli", "overview", "--bogus"])
-    assert "hint: run 'python -m events --help'" in capsys.readouterr().err
+    assert "hint: run 'python -m events_cli --help'" in capsys.readouterr().err
 
     # CliError raised from the explain catalog.
     assert main(["explain", "nonexistent"]) == 1
-    assert "hint: list entries with: python -m events explain" in capsys.readouterr().err
+    assert "hint: list entries with: python -m events_cli explain" in capsys.readouterr().err
+
+
+# --- packaging contract ----------------------------------------------------
+#
+# Three names, deliberately different, each pinned below:
+#   distribution  events-cli   (PyPI — `pip install events-cli`)
+#   command       events       ([project.scripts] — what a user types)
+#   import        events_cli   (the top-level module)
+# The import name is NOT `events`: PyPI distribution `Events` 0.5 already owns
+# that top-level module, so shipping it too would silently clobber one of the
+# two in any environment that holds both.
+
+
+def _pyproject_data() -> dict:
+    import tomllib
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    if not path.is_file():  # pragma: no cover - wheel install, no source tree
+        pytest.skip("no pyproject.toml alongside the package")
+    return tomllib.loads(path.read_text(encoding="utf-8"))
+
+
+def test_import_package_is_events_cli() -> None:
+    """The importable top-level module is ``events_cli``."""
+    import events_cli
+
+    assert events_cli.__name__ == "events_cli"
+    assert events_cli.__version__ == __version__
+
+
+def test_packaging_config_points_at_events_cli() -> None:
+    """Every packaging knob names ``events_cli``; the console script stays ``events``."""
+    data = _pyproject_data()
+    assert data["project"]["name"] == "events-cli"
+    assert data["project"]["scripts"] == {"events": "events_cli.cli:main"}
+    assert data["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == ["events_cli"]
+    assert data["tool"]["coverage"]["run"]["source"] == ["events_cli"]
+    assert data["tool"]["isort"]["known_first_party"] == ["events_cli"]
+
+
+def test_no_top_level_events_package_in_the_source_tree() -> None:
+    """Nothing may reintroduce a top-level ``events`` package beside the source.
+
+    The wheel ships exactly the packages named in
+    ``[tool.hatch.build.targets.wheel]``, so the collision can only come back by
+    someone re-adding the directory.
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    if not (root / "pyproject.toml").is_file():  # pragma: no cover - wheel install
+        pytest.skip("no source tree")
+    assert not (root / "events").exists(), "top-level `events` package collides with PyPI Events"

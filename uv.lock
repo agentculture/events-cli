@@ -156,7 +156,7 @@ wheels = [
 
 [[package]]
 name = "events-cli"
-version = "0.6.1"
+version = "0.8.0"
 source = { editable = "." }
 
 [package.dev-dependencies]

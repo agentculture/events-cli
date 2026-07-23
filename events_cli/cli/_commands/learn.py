@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import argparse
 
-from events import __version__
-from events.cli._output import emit_result
+from events_cli import __version__
+from events_cli.cli._output import emit_result
 
 _TEXT = """\
 events — the AgentCulture event fabric.
@@ -55,9 +55,11 @@ More detail
 
 def _as_json_payload() -> dict[str, object]:
     return {
-        # The command an agent actually invokes, not the distribution name.
+        # Three distinct names, all machine-discoverable: the command an agent
+        # invokes, the distribution it installs, and the module it imports.
         "tool": "events",
         "distribution": "events-cli",
+        "import_package": "events_cli",
         "version": __version__,
         "purpose": (
             "The AgentCulture event fabric: a Dockerised Mosquitto MQTT broker fronted "

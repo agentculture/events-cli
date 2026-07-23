@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from events.cli import main
+from events_cli.cli import main
 
 # --- overview -------------------------------------------------------------
 
