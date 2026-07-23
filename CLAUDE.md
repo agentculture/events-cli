@@ -115,10 +115,15 @@ events-cli` working for callers that know the repo by that name. **Do not remove
 either key** — dropping `("events",)` fails CI.
 `test_explain_root_keys_both_resolve_to_same_entry` pins both.
 
-**Command name:** the parser's `prog` is `events`, matching the console script,
-and `test_prog_matches_installed_console_script` reads `[project.scripts]` from
-`pyproject.toml` to keep the two in lockstep. Rename one and that test fails
-rather than shipping a `--help` that names a nonexistent command.
+**Command name:** hints tell an agent what to run *next*, so they must name a
+command that exists in the mode the caller is already using.
+`events/cli/_prog.py` resolves it — `events` when installed, `python -m events`
+under the no-install fallback — and feeds both argparse's `prog` and the
+`explain` unknown-path remediation. It compares `sys.argv[0]` to *this*
+package's `__main__.py` by full path; a basename check matches every `python -m`
+host, `python -m pytest` included. `test_prog_matches_installed_console_script`
+reads `[project.scripts]` from `pyproject.toml` to keep the console-script name
+and `prog` in lockstep, so renaming either side fails there rather than shipping.
 
 `whoami` parses `culture.yaml` with a hand-rolled line scanner
 (`events/cli/_commands/whoami.py`) rather than PyYAML, deliberately: the runtime

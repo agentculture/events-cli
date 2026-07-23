@@ -23,6 +23,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (version-bump-every-PR, `cicd`, `ask-colleague`, worktree location, memory
   discipline). Also reconciles the seed's stale `backend: claude` claim against
   `culture.yaml`'s actual `backend: colleague`.
+- **`events/cli/_prog.py`** — resolves the command name to name back at the
+  user, so remediation hints reference an invocation that actually exists. The
+  installed console script gets `events`; the documented no-install fallback
+  (`python -m events` from a checkout, where the console script is typically
+  absent) gets `python -m events`. Detection compares `sys.argv[0]` against
+  *this* package's `__main__.py` by full path — a basename check would match
+  every other `python -m` host, `python -m pytest` included. Consumed by
+  argparse's `prog` and by the `explain` catalog's unknown-path remediation.
 - **Two regression tests for the command-name contract** —
   `test_prog_matches_installed_console_script` reads `[project.scripts]` from
   `pyproject.toml` and asserts argparse's `prog` matches it, so the two can
