@@ -29,7 +29,7 @@ jobs:
 
       - run: uv sync
 
-      - run: uv run pytest -n auto --cov=events --cov-report=xml:coverage.xml --cov-report=term -v
+      - run: uv run pytest -n auto --cov=events_cli --cov-report=xml:coverage.xml --cov-report=term -v
 
       - name: SonarCloud Scan
         if: env.SONAR_TOKEN != ''
@@ -55,16 +55,16 @@ jobs:
       - run: uv sync
 
       - name: black --check
-        run: uv run black --check events tests
+        run: uv run black --check events_cli tests
 
       - name: isort --check
-        run: uv run isort --check-only events tests
+        run: uv run isort --check-only events_cli tests
 
       - name: flake8
-        run: uv run flake8 events tests
+        run: uv run flake8 events_cli tests
 
       - name: bandit
-        run: uv run bandit -c pyproject.toml -r events
+        run: uv run bandit -c pyproject.toml -r events_cli
 
       - name: markdownlint-cli2
         run: |

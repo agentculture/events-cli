@@ -6,6 +6,10 @@ installed console script is ``events``, ``events-cli`` is the PyPI distribution
 name, and the agent-first rubric's ``explain_self`` check invokes
 ``events explain events``. Keep every one of those keys.
 
+These keys are **command-path names, not module names**: the import package was
+renamed to ``events_cli`` in 0.8.0, and these keys deliberately did not follow —
+they spell what a caller types, and no caller types ``events_cli``.
+
 Keep bodies self-contained: an agent reading one entry should get enough
 context without chaining reads.
 """
@@ -17,15 +21,16 @@ _ROOT = """\
 
 The AgentCulture event fabric. Runs and maintains a Dockerised Eclipse Mosquitto
 MQTT broker and fronts it as a CLI, an HTTP API and an MCP surface — so any app
-can `import events`, any service can call the API, and an agent or a human can
-publish and subscribe to events the same way.
+can `import events_cli`, any service can call the API, and an agent or a human
+can publish and subscribe to events the same way.
 
 Mosquitto transports events; `events` defines what they mean. Consumers depend
 on the `events` contract — typed immutable envelopes, correlation and causation,
 durable history, pipeline runs — not on Mosquitto-specific topic conventions.
 
-The installed console command is `events`; `events-cli` is the distribution name
-on PyPI and the repository name.
+Three names, deliberately distinct: the installed console command is `events`,
+the PyPI distribution (and repository) is `events-cli`, and the import package
+is `events_cli`.
 
 ## Status
 

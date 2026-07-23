@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-07-24
+
+### Added
+
+- **Three packaging-contract tests** pinning the three-way name split.
+  `test_import_package_is_events_cli` asserts the top-level module;
+  `test_packaging_config_points_at_events_cli` reads `pyproject.toml` and
+  asserts the script entry, hatch packages, coverage source and isort
+  first-party all name `events_cli` while the distribution stays `events-cli`;
+  `test_no_top_level_events_package_in_the_source_tree` fails if anyone re-adds
+  an `events/` directory beside the source, which is the only way the PyPI
+  collision can come back.
+
+### Changed
+
+- **The import package is now `events_cli`, not `events`** — breaking for
+  importers, though no consumer binds to it yet. PyPI's
+  [`Events`](https://pypi.org/project/Events/) distribution already owns the
+  top-level module `events`, so any environment installing both `events-cli`
+  and `Events` silently clobbered one; the collision is vacated now, before the
+  first consumer (`reachy-mini-cli`, issue #3) binds to the import name. Renamed
+  with `git mv`, so file history is preserved. **The console command stays
+  `events` and the distribution stays `events-cli`** — only the import name
+  moved. `[project.scripts]` is now `events = "events_cli.cli:main"`, and
+  `[tool.hatch.build.targets.wheel]` packages, `[tool.coverage.run]` source,
+  `[tool.isort]` `known_first_party`, `sonar.sources`, the CI `--cov=` / lint /
+  bandit paths, and `publish.yml`'s path filter all follow.
+- **The documented no-install fallback is `PYTHONPATH=. python3 -m events_cli`.**
+  `_prog.py` still resolves the invocation by comparing `sys.argv[0]` against
+  *this* package's `__main__.py` by full path, so hints name
+  `python -m events_cli` in module mode and `events` when installed. The explain
+  catalog's root keys are deliberately unchanged: `("events",)` and
+  `("events-cli",)` are command-path and distribution names, not module names,
+  and both still resolve to the root entry.
+- **`learn --json` gained an `import_package` field.** All three names — the
+  command (`tool`), the distribution (`distribution`) and the module
+  (`import_package`) — are now machine-discoverable, so an agent consuming the
+  CLI never has to guess which string goes in an `import` statement.
+
 ## [0.7.0] - 2026-07-23
 
 ### Added

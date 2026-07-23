@@ -3,7 +3,7 @@
 Describes the agent to an agent reader: identity (from culture.yaml), the verb
 surface, and the sibling-pattern artifacts this repo carries. The shared
 section/render helpers here are reused by the ``cli`` noun's ``overview`` (see
-:mod:`events.cli._commands.cli`).
+:mod:`events_cli.cli._commands.cli`).
 
 Descriptive verbs never hard-fail on a missing target path — an optional
 positional ``target`` is accepted and ignored (overview describes this agent,
@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import argparse
 
-from events.cli._commands.whoami import report
-from events.cli._output import emit_result
+from events_cli.cli._commands.whoami import report
+from events_cli.cli._output import emit_result
 
 _ARTIFACTS = [
     "culture.yaml + AGENTS.colleague.md — mesh identity (suffix + backend)",

@@ -1,6 +1,6 @@
 [project]
 name = "events-cli"
-version = "0.7.0"
+version = "0.8.0"
 description = "Agent and CLI that runs and maintains a Dockerised Eclipse Mosquitto MQTT broker and fronts it through agentfront as a CLI, an HTTP API and an MCP surface — so any app can import it, any service can call the API, and an agent or a human can publish and subscribe to events the same way."
 readme = "README.md"
 license = "Apache-2.0"
@@ -20,14 +20,17 @@ Homepage = "https://github.com/agentculture/events-cli"
 Issues = "https://github.com/agentculture/events-cli/issues"
 
 [project.scripts]
-events = "events.cli:main"
+# Three names, deliberately distinct: the distribution is `events-cli`, the
+# console command is `events`, and the import package is `events_cli` (PyPI's
+# `Events` distribution already owns the top-level module `events`).
+events = "events_cli.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["events"]
+packages = ["events_cli"]
 
 [dependency-groups]
 dev = [
@@ -42,10 +45,10 @@ dev = [
 ]
 
 [tool.coverage.run]
-source = ["events"]
-omit = ["events/__pycache__/*"]
+source = ["events_cli"]
+omit = ["events_cli/__pycache__/*"]
 # Emit repo-relative paths in coverage.xml so SonarCloud maps them to
-# sonar.sources=events (absolute/.venv paths fail to map → empty coverage).
+# sonar.sources=events_cli (absolute/.venv paths fail to map → empty coverage).
 relative_files = true
 
 [tool.coverage.report]
@@ -60,7 +63,7 @@ exclude_lines = [
 [tool.isort]
 profile = "black"
 line_length = 100
-known_first_party = ["events"]
+known_first_party = ["events_cli"]
 
 [tool.black]
 line-length = 100

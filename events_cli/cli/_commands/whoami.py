@@ -14,8 +14,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from events import __version__
-from events.cli._output import emit_result
+from events_cli import __version__
+from events_cli.cli._output import emit_result
 
 _FALLBACK_NICK = "events-cli"
 

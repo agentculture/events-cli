@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import argparse
 
-from events.cli._commands.overview import cli_sections, emit_overview
+from events_cli.cli._commands.overview import cli_sections, emit_overview
 
 
 def cmd_cli_overview(args: argparse.Namespace) -> int:

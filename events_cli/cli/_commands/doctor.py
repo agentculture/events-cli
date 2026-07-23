@@ -21,8 +21,8 @@ from __future__ import annotations
 
 import argparse
 
-from events.cli._commands.whoami import find_culture_yaml, read_agent_fields
-from events.cli._output import emit_result
+from events_cli.cli._commands.whoami import find_culture_yaml, read_agent_fields
+from events_cli.cli._output import emit_result
 
 # backend → required prompt file (the backend-consistency mapping).
 _PROMPT_FILE = {

@@ -3,8 +3,9 @@
 The AgentCulture **event fabric**. `events-cli` runs and maintains a Dockerised
 Eclipse Mosquitto MQTT broker and fronts it through
 [agentfront](https://github.com/agentculture/agentfront) as a CLI, an HTTP API
-and an MCP surface — so any app can `import events`, any service can call the
-API, and an agent or a human can publish and subscribe to events the same way.
+and an MCP surface — so any app can `import events_cli`, any service can call
+the API, and an agent or a human can publish and subscribe to events the same
+way.
 
 **Mosquitto transports events. `events-cli` defines what they mean.** Consumers
 depend on the `events-cli` contract — typed immutable envelopes, correlation and
@@ -38,8 +39,10 @@ between agents, so the boundary matters:
 
 ## Quickstart
 
-The installed console command is **`events`** (`events-cli` is the PyPI
-distribution name; the import package is `events`).
+Three names, deliberately distinct: the installed console command is
+**`events`**, the PyPI distribution is **`events-cli`**, and the import package
+is **`events_cli`** (not `events` — the PyPI distribution `Events` already owns
+that top-level module).
 
 ```bash
 uv sync
@@ -53,7 +56,7 @@ The runtime package has no third-party dependencies, so it also runs straight
 from a checkout:
 
 ```bash
-PYTHONPATH=. python3 -m events doctor
+PYTHONPATH=. python3 -m events_cli doctor
 ```
 
 ## CLI
@@ -83,10 +86,10 @@ uv run pytest -n auto                  # full suite
 uv run pytest tests/test_cli.py -v     # one file
 uv run pytest -k whoami -v             # one test
 
-uv run black --check events tests
-uv run isort --check-only events tests
-uv run flake8 events tests
-uv run bandit -c pyproject.toml -r events
+uv run black --check events_cli tests
+uv run isort --check-only events_cli tests
+uv run flake8 events_cli tests
+uv run bandit -c pyproject.toml -r events_cli
 ```
 
 Every PR bumps the version — the `version-check` CI job blocks merge otherwise.

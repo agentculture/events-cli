@@ -7,8 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 `events-cli` is the AgentCulture **event fabric**: an agent and CLI that runs and
 maintains a Dockerised Eclipse Mosquitto MQTT broker and fronts it through
 [`agentfront`](https://github.com/agentculture/agentfront) as a CLI, an HTTP API
-and an MCP surface — so any app can `import events`, any service can call the
-API, and an agent or a human can publish and subscribe to events the same way.
+and an MCP surface — so any app can `import events_cli`, any service can call
+the API, and an agent or a human can publish and subscribe to events the same
+way.
 
 **Design principle (from [#1](https://github.com/agentculture/events-cli/issues/1)):**
 *Mosquitto transports events. `events-cli` defines what they mean.* Consumers
@@ -21,7 +22,7 @@ can be replaced later without changing how participants interact.
 **The event/broker domain is not implemented yet.** What is on disk today is the
 agent-first CLI scaffold inherited from `culture-agent-template` — identity,
 introspection verbs, CI, packaging. Nothing MQTT, Docker, envelope- or
-pipeline-related exists in `events/`.
+pipeline-related exists in `events_cli/`.
 
 The domain is specified across three open issues, and they are the requirements
 baseline. Read them before starting work; they are not summarised anywhere else
@@ -62,9 +63,19 @@ suite assert.)
 
 ## The CLI
 
-**The installed console command is `events`** (`[project.scripts]` in
-`pyproject.toml`), not `events-cli` — `events-cli` is the PyPI distribution name
-and the import package is `events`.
+**Three names, deliberately distinct — do not collapse them:**
+
+| Name | What it is |
+|------|------------|
+| `events` | the installed console command (`[project.scripts]` in `pyproject.toml`) |
+| `events-cli` | the PyPI distribution, the repo name, and the mesh nick |
+| `events_cli` | the import package (`import events_cli`) |
+
+The import package is **not** `events`: the PyPI distribution
+[`Events`](https://pypi.org/project/Events/) already owns that top-level module,
+so shipping it here would silently clobber one of the two in any environment
+holding both. The collision was vacated in 0.8.0, before the first consumer
+bound to the import name.
 
 ```bash
 events whoami            # identity from culture.yaml
@@ -79,12 +90,13 @@ Conventions, enforced by the agent-first rubric:
 
 - Every command supports `--json`.
 - **Results to stdout, errors and diagnostics to stderr — never mixed**
-  (`events/cli/_output.py`).
+  (`events_cli/cli/_output.py`).
 - Exit codes: `0` success, `1` user error, `2` environment error, `3+` reserved
-  (`events/cli/_errors.py`).
+  (`events_cli/cli/_errors.py`).
 - No Python traceback ever reaches stderr; every failure is a `CliError` with a
   `remediation` hint, and even argparse parse errors route through the same
-  `error:` / `hint:` format (`_CliArgumentParser` in `events/cli/__init__.py`).
+  `error:` / `hint:` format (`_CliArgumentParser` in
+  `events_cli/cli/__init__.py`).
 
 CI enforces the rubric with `uv run teken cli doctor . --strict`.
 
@@ -92,19 +104,19 @@ CI enforces the rubric with `uv run teken cli doctor . --strict`.
 
 Reading these four files gives you the whole contract; the rest is content.
 
-- `events/cli/__init__.py` — the only parser. `_build_parser()` imports each
+- `events_cli/cli/__init__.py` — the only parser. `_build_parser()` imports each
   command module lazily and calls its `register(sub)`. `_dispatch()` is the
   single place exceptions become exit codes. **Register a new noun group by
   adding one `register()` call here** — there is a marked comment at the
   insertion point.
-- `events/cli/_commands/<verb>.py` — one module per verb/noun. Each exposes
+- `events_cli/cli/_commands/<verb>.py` — one module per verb/noun. Each exposes
   `register(sub)` (adds the subparser, `--json`, and `set_defaults(func=...)`)
   and a `cmd_*` handler returning `None`/`int`. Handlers raise `CliError`; they
   never print errors themselves.
-- `events/cli/_output.py` / `_errors.py` — the stdout/stderr split and the
+- `events_cli/cli/_output.py` / `_errors.py` — the stdout/stderr split and the
   exit-code policy. Both are marked *stable-contract*: changing them changes the
   agent-facing contract, so treat edits as breaking.
-- `events/explain/catalog.py` — markdown keyed by command-path tuple. Every
+- `events_cli/explain/catalog.py` — markdown keyed by command-path tuple. Every
   noun/verb you register needs an entry, and `tests/test_cli.py`'s
   `test_every_catalog_path_resolves` walks all of them.
 
@@ -113,22 +125,27 @@ Reading these four files gives you the whole contract; the rest is content.
 invokes `events explain events`; the dist-name key keeps `events explain
 events-cli` working for callers that know the repo by that name. **Do not remove
 either key** — dropping `("events",)` fails CI.
-`test_explain_root_keys_both_resolve_to_same_entry` pins both.
+`test_explain_root_keys_both_resolve_to_same_entry` pins both. These keys are
+*command-path* names, not module names: the import package rename to
+`events_cli` deliberately did not touch them, because nobody types `events_cli`.
 
 **Command name:** hints tell an agent what to run *next*, so they must name a
 command that exists in the mode the caller is already using.
-`events/cli/_prog.py` resolves it — `events` when installed, `python -m events`
-under the no-install fallback — and feeds both argparse's `prog` and the
-`explain` unknown-path remediation. It compares `sys.argv[0]` to *this*
+`events_cli/cli/_prog.py` resolves it — `events` when installed, `python -m
+events_cli` under the no-install fallback — and feeds both argparse's `prog` and
+the `explain` unknown-path remediation. It compares `sys.argv[0]` to *this*
 package's `__main__.py` by full path; a basename check matches every `python -m`
 host, `python -m pytest` included. `test_prog_matches_installed_console_script`
 reads `[project.scripts]` from `pyproject.toml` to keep the console-script name
 and `prog` in lockstep, so renaming either side fails there rather than shipping.
+The three-way name split itself is pinned by
+`test_packaging_config_points_at_events_cli` and
+`test_no_top_level_events_package_in_the_source_tree`.
 
 `whoami` parses `culture.yaml` with a hand-rolled line scanner
-(`events/cli/_commands/whoami.py`) rather than PyYAML, deliberately: the runtime
-package has **zero third-party dependencies**. It locates the file by walking up
-from `__file__`, so identity is always *this agent's*, never whatever
+(`events_cli/cli/_commands/whoami.py`) rather than PyYAML, deliberately: the
+runtime package has **zero third-party dependencies**. It locates the file by
+walking up from `__file__`, so identity is always *this agent's*, never whatever
 `culture.yaml` sits in the caller's CWD; a wheel install finds none and falls
 back to literal defaults (which is why `doctor` reports a single info check and
 exits 0 there).
@@ -141,7 +158,7 @@ not code — nothing below exists yet.
 **One registry, four surfaces.** agentfront is an importable runtime, not a
 scaffolder: declare docs and tools once on an `App`, and CLI, MCP and HTTP are
 *derived* from that registry, so they cannot drift apart. agentfront derives
-three surfaces; the request names four. The fourth — `import events` — is not
+three surfaces; the request names four. The fourth — `import events_cli` — is not
 agentfront's and is yours to keep honest. Build a core module that owns event
 semantics and populate the agentfront registry *from that core*. If the registry
 is filled by separate adapter functions, the import lane becomes a fourth thing
@@ -241,19 +258,19 @@ because the resemblance will otherwise be assumed.
 
 ```bash
 uv sync
-uv run pytest -n auto                  # full suite (24 tests today)
+uv run pytest -n auto                  # full suite (29 tests today)
 uv run pytest tests/test_cli.py -v     # one file
 uv run pytest -k whoami -v             # one test / pattern
-uv run pytest -n auto --cov=events --cov-report=term   # with coverage
+uv run pytest -n auto --cov=events_cli --cov-report=term   # with coverage
 ```
 
 Lint — all four run in CI and must pass:
 
 ```bash
-uv run black --check events tests      # line length 100
-uv run isort --check-only events tests # profile=black
-uv run flake8 events tests
-uv run bandit -c pyproject.toml -r events
+uv run black --check events_cli tests      # line length 100
+uv run isort --check-only events_cli tests # profile=black
+uv run flake8 events_cli tests
+uv run bandit -c pyproject.toml -r events_cli
 markdownlint-cli2 "**/*.md" "#node_modules" "#.local" "#.claude/skills" "#.teken"
 uv run teken cli doctor . --strict     # the agent-first rubric gate
 ```
@@ -267,7 +284,7 @@ The CLI has no runtime dependencies, so it also runs straight from a checkout
 without `uv sync` — useful when the network is unavailable:
 
 ```bash
-PYTHONPATH=. python3 -m events doctor
+PYTHONPATH=. python3 -m events_cli doctor
 PYTHONPATH=. python3 -m pytest tests -q
 ```
 
@@ -277,7 +294,7 @@ PYTHONPATH=. python3 -m pytest tests -q
   `version-bump` skill; the `version-check` CI job comments on and blocks the PR
   otherwise. This repo published to production PyPI on its genesis push, so the
   Trusted Publisher is already registered and a push to `main` touching
-  `pyproject.toml` or `events/**` publishes for real.
+  `pyproject.toml` or `events_cli/**` publishes for real.
 - **PRs go through the `cicd` skill** (`devex pr` + SonarCloud gating). Sign
   online posts as `- events-cli (Claude)`; the `cicd` / `communicate` scripts
   resolve the nick from `culture.yaml` automatically, so don't hand-sign in
@@ -365,7 +382,7 @@ invoked. Copy `.claude/skills.local.yaml.example` to `skills.local.yaml`
 ## Layout
 
 ```text
-events/                   agent-first CLI (cited from teken's python-cli reference)
+events_cli/               agent-first CLI (cited from teken's python-cli reference)
   cli/__init__.py         the single parser + dispatch/exit-code translation
   cli/_output.py          stdout/stderr split          (stable-contract)
   cli/_errors.py          CliError + exit-code policy  (stable-contract)
@@ -385,7 +402,7 @@ Not built; tracked in the issues above. The rough order the constraints imply:
 1. **Core event semantics** — envelope + validation, pure and dockerless, as the
    module the other surfaces are built from.
 2. **agentfront binding** — one registry deriving CLI/MCP/HTTP, plus the
-   `import events` lane fed from the same core. Requires migrating the dev
+   `import events_cli` lane fed from the same core. Requires migrating the dev
    dependency (below).
 3. **Stack management** — `events init` / `up` / `status` / `logs` / `down`,
    Compose with `127.0.0.1:1883:1883`, `persistence true` + volume, dynsec.

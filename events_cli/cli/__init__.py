@@ -1,15 +1,15 @@
 """Unified CLI entry point for events-cli.
 
 The agent-first global verbs (``whoami``, ``learn``, ``explain``, ``overview``,
-``doctor``) are registered here under :mod:`events.cli._commands`,
+``doctor``) are registered here under :mod:`events_cli.cli._commands`,
 alongside the ``cli`` noun group. Future noun groups register via their own
 ``register()`` functions following the same pattern.
 
 Error propagation contract
 --------------------------
-Every handler raises :class:`events.cli._errors.CliError` on
+Every handler raises :class:`events_cli.cli._errors.CliError` on
 failure; ``main()`` catches it via :func:`_dispatch` and routes through
-:mod:`events.cli._output`. Unknown exceptions are wrapped into a
+:mod:`events_cli.cli._output`. Unknown exceptions are wrapped into a
 ``CliError`` so no Python traceback leaks to stderr.
 
 Argparse errors (unknown verb, missing arg) also route through the structured
@@ -24,10 +24,10 @@ from __future__ import annotations
 import argparse
 import sys
 
-from events import __version__
-from events.cli._errors import EXIT_USER_ERROR, CliError
-from events.cli._output import emit_error
-from events.cli._prog import prog_name
+from events_cli import __version__
+from events_cli.cli._errors import EXIT_USER_ERROR, CliError
+from events_cli.cli._output import emit_error
+from events_cli.cli._prog import prog_name
 
 _ISSUES_URL = "https://github.com/agentculture/events-cli/issues"
 
@@ -63,18 +63,18 @@ def _argv_has_json(argv: list[str] | None) -> bool:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    from events.cli._commands import cli as _cli_group
-    from events.cli._commands import doctor as _doctor_cmd
-    from events.cli._commands import explain as _explain_cmd
-    from events.cli._commands import learn as _learn_cmd
-    from events.cli._commands import overview as _overview_cmd
-    from events.cli._commands import whoami as _whoami_cmd
+    from events_cli.cli._commands import cli as _cli_group
+    from events_cli.cli._commands import doctor as _doctor_cmd
+    from events_cli.cli._commands import explain as _explain_cmd
+    from events_cli.cli._commands import learn as _learn_cmd
+    from events_cli.cli._commands import overview as _overview_cmd
+    from events_cli.cli._commands import whoami as _whoami_cmd
 
     parser = _CliArgumentParser(
         # `prog` must match what the caller actually types, or --help and every
         # argparse error name a command that does not exist. That is `events`
         # when installed (`events-cli` is only the PyPI distribution name) and
-        # `python -m events` from a checkout — see events.cli._prog.
+        # `python -m events_cli` from a checkout — see events_cli.cli._prog.
         prog=prog_name(),
         description="events — the AgentCulture event fabric: an MQTT broker fronted "
         "as a CLI, an HTTP API and an MCP surface.",
@@ -95,7 +95,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _doctor_cmd.register(sub)
     _cli_group.register(sub)
     # Register your own noun groups here:
-    #   from events.cli._commands import my_noun as _my_noun_group
+    #   from events_cli.cli._commands import my_noun as _my_noun_group
     #   _my_noun_group.register(sub)
 
     return parser
