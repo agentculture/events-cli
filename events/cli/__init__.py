@@ -70,8 +70,12 @@ def _build_parser() -> argparse.ArgumentParser:
     from events.cli._commands import whoami as _whoami_cmd
 
     parser = _CliArgumentParser(
-        prog="events-cli",
-        description="events-cli — a clonable template for AgentCulture mesh agents.",
+        # The installed console script is `events`; `events-cli` is the PyPI
+        # distribution name. `prog` must match what a user actually types, or
+        # --help and every argparse error name a command that does not exist.
+        prog="events",
+        description="events — the AgentCulture event fabric: an MQTT broker fronted "
+        "as a CLI, an HTTP API and an MCP surface.",
     )
     parser.add_argument(
         "--version",

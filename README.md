@@ -1,27 +1,59 @@
 # events-cli
 
-Agent and CLI that runs and maintains a Dockerised Eclipse Mosquitto MQTT broker and fronts it through agentfront as a CLI, an HTTP API and an MCP surface — so any app can import it, any service can call the API, and an agent or a human can publish and subscribe to events the same way.
+The AgentCulture **event fabric**. `events-cli` runs and maintains a Dockerised
+Eclipse Mosquitto MQTT broker and fronts it through
+[agentfront](https://github.com/agentculture/agentfront) as a CLI, an HTTP API
+and an MCP surface — so any app can `import events`, any service can call the
+API, and an agent or a human can publish and subscribe to events the same way.
 
-## What you get
+**Mosquitto transports events. `events-cli` defines what they mean.** Consumers
+depend on the `events-cli` contract — typed immutable envelopes, correlation and
+causation, pipeline runs — not on Mosquitto-specific topic conventions, so the
+transport can be replaced later without changing how participants interact.
 
-- **An agent-first CLI** cited from [teken](https://github.com/agentculture/teken)
-  (`afi-cli`) — the runtime package has no third-party dependencies.
-- **A mesh identity** — `culture.yaml` (`suffix` + `backend`) and the matching
-  resident prompt file (`AGENTS.colleague.md`, since this template runs
-  `backend: colleague`).
-- **The canonical guildmaster skill kit** (11 skills) under `.claude/skills/`,
-  vendored cite-don't-import. See [`docs/skill-sources.md`](docs/skill-sources.md).
-- **A build + deploy baseline** — pytest, lint, the agent-first rubric gate, and
-  PyPI Trusted Publishing wired into GitHub Actions.
+## Status: scaffold
+
+The event and broker domain is **not implemented yet**. What ships today is the
+agent-first CLI scaffold: identity, introspection verbs, packaging and CI. The
+domain is specified in three open issues, which are the requirements baseline:
+
+- [#1](https://github.com/agentculture/events-cli/issues/1) — the spec:
+  CloudEvents envelope, pipeline model, CLI surface, security defaults,
+  acceptance criteria, non-goals.
+- [#2](https://github.com/agentculture/events-cli/issues/2) — the agentfront
+  binding, the `watch` request/response constraint, and mesh lane boundaries.
+- [#3](https://github.com/agentculture/events-cli/issues/3) — the first
+  co-located consumer and the direct-MQTT loopback slice.
+
+## Where it sits in the mesh
+
+[`culture`](https://github.com/agentculture/culture) already moves messages
+between agents, so the boundary matters:
+
+- **culture** carries *agent conversation* — peer-to-peer, human-readable,
+  presence-oriented, IRC-shaped.
+- **events-cli** carries *machine events* — typed immutable envelopes,
+  correlation and causation, durable history, pipeline runs, app-to-app as much
+  as agent-to-agent.
 
 ## Quickstart
 
+The installed console command is **`events`** (`events-cli` is the PyPI
+distribution name; the import package is `events`).
+
 ```bash
 uv sync
-uv run pytest -n auto                 # run the test suite
-uv run events-cli whoami  # identity from culture.yaml
-uv run events-cli learn   # self-teaching prompt (add --json)
-uv run teken cli doctor . --strict    # the agent-first rubric gate CI runs
+uv run pytest -n auto              # run the test suite
+uv run events whoami               # identity from culture.yaml
+uv run events learn                # self-teaching prompt (add --json)
+uv run teken cli doctor . --strict # the agent-first rubric gate CI runs
+```
+
+The runtime package has no third-party dependencies, so it also runs straight
+from a checkout:
+
+```bash
+PYTHONPATH=. python3 -m events doctor
 ```
 
 ## CLI
@@ -35,24 +67,34 @@ uv run teken cli doctor . --strict    # the agent-first rubric gate CI runs
 | `doctor` | Check the agent-identity invariants (prompt-file-present, backend-consistency). |
 | `cli overview` | Describe the CLI surface itself. |
 
-Every command supports `--json`. Results go to stdout, errors/diagnostics to
+Every command supports `--json`. Results go to stdout, errors and diagnostics to
 stderr (never mixed). Exit codes: `0` success, `1` user error, `2` environment
-error, `3+` reserved.
+error, `3+` reserved. No Python traceback ever reaches stderr — every failure
+carries a `remediation` hint.
 
-## Make it your own
+The stack, event and pipeline verbs sketched in
+[#1](https://github.com/agentculture/events-cli/issues/1) (`events up`,
+`events emit`, `events watch`, `events pipeline …`) are **not implemented yet**.
 
-1. Rename the package `events/` and the `events-cli`
-   CLI/dist name throughout `pyproject.toml`, the package, `tests/`,
-   `sonar-project.properties`, and this `README.md`. The name is hard-coded in
-   ~100 places, so list every occurrence first — see the `git grep` discovery
-   command in [`CLAUDE.md`](CLAUDE.md), the authoritative rename procedure.
-2. Edit `culture.yaml` with your `suffix` and `backend`.
-3. Rewrite `CLAUDE.md` for your agent and run `/init`.
-4. Re-vendor only the skills you need from guildmaster (see
-   [`docs/skill-sources.md`](docs/skill-sources.md)).
+## Development
 
-See [`CLAUDE.md`](CLAUDE.md) for the full conventions (version-bump-every-PR,
-the `cicd` PR lane, deploy setup).
+```bash
+uv run pytest -n auto                  # full suite
+uv run pytest tests/test_cli.py -v     # one file
+uv run pytest -k whoami -v             # one test
+
+uv run black --check events tests
+uv run isort --check-only events tests
+uv run flake8 events tests
+uv run bandit -c pyproject.toml -r events
+```
+
+Every PR bumps the version — the `version-check` CI job blocks merge otherwise.
+Pushing to `main` publishes to PyPI via Trusted Publishing; PRs do a TestPyPI
+dry-run.
+
+See [`CLAUDE.md`](CLAUDE.md) for the architecture, the design constraints that
+are expensive to retrofit, and the full contributor conventions.
 
 ## License
 
