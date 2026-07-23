@@ -39,6 +39,12 @@
 - watch is durable server-side subscriptions plus cursor drain: named persistent subscriptions owned by an identity, drained via `--since <cursor>` --max N --timeout, with non-infinite defaults on every agent-facing tool; unbounded streaming stays CLI/HTTP-SSE only; designed together with history since replay-from-cursor and survive-a-restart are the same machinery (issue #2 hard constraint)
   - instruction: Tracked as #7, its own arc designed with history: named identity-owned subscriptions, control-service store (evaluate eidetic-cli / data-refinery-cli first per #2), drain verb --since/--max/--timeout with non-infinite defaults, streaming only on CLI/HTTP-SSE
   - honesty: When durable subscriptions land (#7): a drain call returns within its timeout with at most --max events plus a cursor; resuming from that cursor loses nothing acknowledged; a broker restart preserves both subscription registrations and undrained history
+- The compose pins an exact Mosquitto version tag, not the floating eclipse-mosquitto:2 — the upstream-default annotations in the generated mosquitto.conf are only true for a specific version, and an unpinned tag can change security behavior under the deploy silently [challenge pass / operations lens: c4 vs CLAUDE.md verify-against-the-version-you-pin constraint]
+  - honesty: The generated compose contains an exact mosquitto version tag and a unit test fails if the template ever carries a bare floating major tag
+- The migration is reversible and says so: the migration doc records the exact rollback command (the nova compose file remains in reachy_nova) so a failed events-cli stack can be rolled back to the nova broker in one step during the cutover window [challenge pass / reversibility lens: docker-compose.nervous-system.yml still on disk]
+  - honesty: The migration doc names the exact one-command rollback, and the cutover runbook is exercised once on spark-f8a9 (forward, back, forward) before the migration is called done
+- The client generates a unique per-process client id by default (caller-overridable): MQTT brokers disconnect the existing session on client-id takeover, so two co-located producers or CLI sessions sharing a default id would kick each other into reconnect loops — the robot publisher, the reTerminal bridge and ad-hoc CLI probes all connect to the same loopback broker [challenge pass / concurrency lens: MQTT session-takeover semantics + issue #3 consumer set]
+  - honesty: An integration test connects two default-constructed clients concurrently and both stay connected — default client ids observed unique across processes
 
 ## Honesty conditions
 
@@ -51,6 +57,9 @@
 - The before-state is evidence, not narrative: ss -ltn and docker ps captured 0.0.0.0:1883/9001 and the nova pair on 2026-07-23, and the events/ package contains no MQTT, docker or envelope code at that date's HEAD
 - The blocked-consumer claim is traceable: reachy-mini-cli's converged spec and events-cli#3 both record that its broker-dependent acceptance items wait on this slice; no other machine-event substrate exists in the mesh today
 - The success signal is exactly issue #3's acceptance checklist plus its amendment's sub-millisecond enqueue criterion — verified on the deploy box, each item a command with observable output, none a judgment call
+- A CI-run test exercises the introspection verbs from a tree where paho-mqtt is not installed and they pass — the no-install lane is proven per PR, not assumed
+- An integration test (stack-marked) kills the broker container uncleanly after a retained publish and the docs state exactly what survived — the durability claim is measured, not assumed
+- The default pytest selection (the one CI and Sonar see) contains no wall-clock timing assertion; the enqueue measurement runs behind a marker with a documented generous bound
 
 ## Success signals
 
@@ -64,17 +73,21 @@
   - instruction: Add the one-sentence lane statement to the README (culture = agent conversation, events-cli = machine events), citing issue #2's adjudication
 - Docker is never a unit-test dependency: envelope validation and pipeline-transition logic stay pure with high coverage; broker/stack integration tests are marked and separately selectable so the SonarCloud quality gate never depends on a live broker
   - instruction: Add a pytest marker (e.g. stack) for broker/docker integration tests, excluded by default in addopts; unit coverage of envelope + client logic stays dockerless; Sonar coverage comes from the default selection only
+- The paho-mqtt import is lazy: introspection verbs (whoami, doctor, learn, explain) keep working from a bare checkout with no dependencies installed, preserving the documented PYTHONPATH=. python3 -m events fallback — the base dep (q1) must not break the no-install lane [challenge pass / hidden-dependencies lens: CLAUDE.md no-install fallback + q1 decision]
+- The sub-millisecond enqueue assertion runs as a marked perf test with generous headroom or outside the default CI selection: a wall-clock timing assertion on shared CI runners will eventually flake, and c16 forbids flaky inputs to the Sonar gate [challenge pass / counter-evidence lens: h3 vs c16]
 
 ## Non-goals
 
 - Issue #1 non-goals hold for this arc: no reimplementing MQTT, no multiple broker technologies, no Kubernetes, no GUI, no arbitrary user code inside the Events service, no general-purpose workflow engine, no exactly-once guarantees
 - No bespoke history store is built from scratch: eidetic-cli and data-refinery-cli already own the memory/storage lane and are evaluated first before any control-service persistence beyond mosquitto state lands
+- No WebSocket listener in the first slice: nova exposed 9001 for debugging; the new stack does not, and websockets return (if ever) via the #7 streaming lane as an explicit opt-in [challenge pass / adjacent-systems lens: nova mosquitto.conf 9001 + traffic probe]
 
 ## Assumptions
 
 - The raw MQTT port stays a first-class documented surface for co-located latency-sensitive producers; producer-owned topic trees (reachy/events/{source}/{type}, retained reachy/state/{key}) are never forced through envelope validation or pipelines; anonymous auth on loopback is acceptable for this slice (issue #3)
 - The contract states consumer-side idempotency keyed on event id as a requirement, because QoS 1 is at-least-once and exactly-once is a non-goal; retained messages are documented as last-value, not history — history lives in the control-service store
 - events up shells out to docker via stdlib subprocess for this slice: shell-cli, which owns the confinement lane, is scaffold-only today (no operation, policy or runner built), so routing through it is deferred and documented rather than silently skipped
+- Retained-state durability has a bound: clean broker shutdown (SIGTERM via docker stop/restart) persists retained state, but an uncleanly killed broker may lose writes since the last autosave — the generated mosquitto.conf sets autosave_interval explicitly and the docs state the bound instead of implying retained state is unconditionally durable [challenge pass / failure-modes lens: persistence semantics, to be verified by the kill-broker integration test]
 
 ## Scope exploration
 
@@ -99,6 +112,19 @@
 - `s10` — `reachy-mini-cli spec (docs/specs/2026-07-23-reachy-nervous-system.md) + docs/export-schema.md`: the consumer codes against an injected client seam, binds the real import in one composition line once the first events-cli wheel ships (base dep + uv lock same change), reads REACHY_MQTT_URL defaulting localhost:1883, ships no compose of its own, and never carries media payloads in events
   - seeds: `c3`, `c9`
 - `s11` — `eidetic recall (--scope events-cli)`: no prior events-cli implementation decisions in memory — only eidetic's own roadmap surfaced; the three issues genuinely are the whole requirements baseline
+- `s12` — `challenge pass / adjacent-systems lens: live nova-mosquitto traffic (wildcard + $SYS probe)`: 2 connected clients (this probe + nova-nervous-system), zero live event traffic in an 8s window, only two retained nova/state/* values — nothing else on the box consumes the broker, so the migration orphans only the nova pair's own state
+  - seeds: `c5`
+- `s13` — `challenge pass / hidden-dependencies lens: PyPI namespace (pypi.org/pypi/events/json)`: PyPI 'Events' 0.5 owns import events; events-cli 0.7.0 ships the same top-level module — collision confirmed by probe, routed as q5 (user decision: rename vs document+guard)
+- `s14` — `challenge pass / operations lens: docker compose + host tooling probes`: Docker Compose v5.0.1 plugin present on spark-f8a9; host has no mosquitto_pub/mosquitto_sub, so issue #3's pub/sub acceptance round-trip runs via docker exec into the broker container (as this pass's probe did)
+  - seeds: `c4`
+- `s15` — `challenge pass / failure-modes lens: localhost resolution (getent ahosts)`: localhost resolves to 127.0.0.1 only on spark-f8a9, so the v4-only compose mapping cannot silently no-op a localhost-dialing client on this box; on dual-stack boxes a v6-first localhost could — client docs should prefer explicit 127.0.0.1
+  - seeds: `c9`
+- `s16` — `challenge pass / concurrency lens: co-located client set`: robot publisher + reTerminal bridge + ad-hoc CLI sessions share one loopback broker; MQTT client-id takeover would make same-id clients kick each other — seeded the unique-client-id requirement
+  - seeds: `c29`
+- `s17` — `challenge pass / reversibility lens: nova rollback path`: reachy_nova's docker-compose.nervous-system.yml remains on disk after the stack is stopped, so a one-command rollback exists during the cutover window — seeded the documented-rollback requirement
+  - seeds: `c28`
+- `s18` — `challenge pass / security lens: compose mapping + upstream defaults`: c4/c9 examined against the live anti-pattern and Mosquitto 2.0 defaults; clean beyond the exact-version-pin finding — the loopback mapping, anonymous-on-loopback posture and no-listener defaults hold as specified
+  - seeds: `c27`
 
 ## Decisions
 
@@ -106,3 +132,5 @@
 - The hand-rolled argparse CLI stays the CLI surface; the agentfront App registry is fed from the same core and derives MCP + HTTP only, with CLI/registry parity pinned by our own tests (user decision 2026-07-23, q2)
 - Pipelines are deferred: this arc ships producer-owned reachy topics only; whether devague is the first pipeline consumer is decided when the pipeline layer is built (user decision 2026-07-23, q3)
 - First arc = the #3 unblock slice — envelope core, importable client, stack verbs, nova migration, PyPI release; deferred and tracked on this repo: agentfront MCP/HTTP binding (#6), durable subscriptions + history (#7), pipelines (#8), shell-cli routing for events up (#9), dynsec identities / remote opt-in (#10); issue #1 pipeline acceptance is explicitly NOT met by this slice (user decision 2026-07-23, q4)
+- The import package is renamed events -> events_cli before the first consumer binds (user decision 2026-07-23, resolves q5): PyPI 'Events' 0.5 owns import events, and the cheapest moment to vacate the collision is while zero consumers exist; the console command stays events, the dist stays events-cli
+  - instruction: Rename the events/ package dir to events_cli/, update [project.scripts] (events = events_cli.cli:main), hatch packages, coverage source, isort known_first_party, and the no-install fallback docs (python -m events_cli); the explain-catalog keys are command-path names tied to the console command and stay ('events',)/('events-cli',); update the repo description and note the change on issue #2's provisioning record

@@ -4,7 +4,7 @@
   "schema_version": 3,
   "status": "exported",
   "created": "2026-07-23T16:38:10Z",
-  "updated": "2026-07-23T18:30:32Z",
+  "updated": "2026-07-23T20:18:01Z",
   "claims": [
     {
       "id": "c1",
@@ -392,12 +392,151 @@
       "hard_questions": [],
       "links": [],
       "instruction": ""
+    },
+    {
+      "id": "c26",
+      "kind": "boundary",
+      "text": "The paho-mqtt import is lazy: introspection verbs (whoami, doctor, learn, explain) keep working from a bare checkout with no dependencies installed, preserving the documented PYTHONPATH=. python3 -m events fallback \u2014 the base dep (q1) must not break the no-install lane [challenge pass / hidden-dependencies lens: CLAUDE.md no-install fallback + q1 decision]",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h18",
+          "text": "A CI-run test exercises the introspection verbs from a tree where paho-mqtt is not installed and they pass \u2014 the no-install lane is proven per PR, not assumed",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c27",
+      "kind": "requirement",
+      "text": "The compose pins an exact Mosquitto version tag, not the floating eclipse-mosquitto:2 \u2014 the upstream-default annotations in the generated mosquitto.conf are only true for a specific version, and an unpinned tag can change security behavior under the deploy silently [challenge pass / operations lens: c4 vs CLAUDE.md verify-against-the-version-you-pin constraint]",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h19",
+          "text": "The generated compose contains an exact mosquitto version tag and a unit test fails if the template ever carries a bare floating major tag",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c28",
+      "kind": "requirement",
+      "text": "The migration is reversible and says so: the migration doc records the exact rollback command (the nova compose file remains in reachy_nova) so a failed events-cli stack can be rolled back to the nova broker in one step during the cutover window [challenge pass / reversibility lens: docker-compose.nervous-system.yml still on disk]",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h20",
+          "text": "The migration doc names the exact one-command rollback, and the cutover runbook is exercised once on spark-f8a9 (forward, back, forward) before the migration is called done",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c29",
+      "kind": "requirement",
+      "text": "The client generates a unique per-process client id by default (caller-overridable): MQTT brokers disconnect the existing session on client-id takeover, so two co-located producers or CLI sessions sharing a default id would kick each other into reconnect loops \u2014 the robot publisher, the reTerminal bridge and ad-hoc CLI probes all connect to the same loopback broker [challenge pass / concurrency lens: MQTT session-takeover semantics + issue #3 consumer set]",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h21",
+          "text": "An integration test connects two default-constructed clients concurrently and both stay connected \u2014 default client ids observed unique across processes",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c30",
+      "kind": "assumption",
+      "text": "Retained-state durability has a bound: clean broker shutdown (SIGTERM via docker stop/restart) persists retained state, but an uncleanly killed broker may lose writes since the last autosave \u2014 the generated mosquitto.conf sets autosave_interval explicitly and the docs state the bound instead of implying retained state is unconditionally durable [challenge pass / failure-modes lens: persistence semantics, to be verified by the kill-broker integration test]",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h17",
+          "text": "An integration test (stack-marked) kills the broker container uncleanly after a retained publish and the docs state exactly what survived \u2014 the durability claim is measured, not assumed",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c31",
+      "kind": "boundary",
+      "text": "The sub-millisecond enqueue assertion runs as a marked perf test with generous headroom or outside the default CI selection: a wall-clock timing assertion on shared CI runners will eventually flake, and c16 forbids flaky inputs to the Sonar gate [challenge pass / counter-evidence lens: h3 vs c16]",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h22",
+          "text": "The default pytest selection (the one CI and Sonar see) contains no wall-clock timing assertion; the enqueue measurement runs behind a marker with a documented generous bound",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c32",
+      "kind": "non_goal",
+      "text": "No WebSocket listener in the first slice: nova exposed 9001 for debugging; the new stack does not, and websockets return (if ever) via the #7 streaming lane as an explicit opt-in [challenge pass / adjacent-systems lens: nova mosquitto.conf 9001 + traffic probe]",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c33",
+      "kind": "decision",
+      "text": "The import package is renamed events -> events_cli before the first consumer binds (user decision 2026-07-23, resolves q5): PyPI 'Events' 0.5 owns import events, and the cheapest moment to vacate the collision is while zero consumers exist; the console command stays events, the dist stays events-cli",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Rename the events/ package dir to events_cli/, update [project.scripts] (events = events_cli.cli:main), hatch packages, coverage source, isort known_first_party, and the no-install fallback docs (python -m events_cli); the explain-catalog keys are command-path names tied to the console command and stay ('events',)/('events-cli',); update the repo description and note the change on issue #2's provisioning record"
     }
   ],
   "open_vagueness": [
     {
       "id": "v1",
       "text": "Identity/ACL timing: anonymous-on-loopback is accepted for this slice; when remote opt-in or multi-identity lands, mosquitto_ctrl dynsec (runtime JSON config, no reload per change) is the mechanism \u2014 but when identities become mandatory is not decidable until someone actually needs remote access",
+      "kind": "unknown_nonblocking",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v2",
+      "text": "Residual after the rigorous pass: mosquitto autosave/persistence semantics were asserted from general knowledge, not upstream docs read in this pass (bounded by the kill-broker test on c30); the traffic probe window was 8s, so a rarely-connecting silent subscriber would not have appeared; 9001 websocket consumers are very unlikely (nervous-system uses 1883 per its compose env) but not conclusively ruled out",
       "kind": "unknown_nonblocking",
       "claim_id": null,
       "resolved": false,
@@ -503,6 +642,60 @@
       "surface": "eidetic recall (--scope events-cli)",
       "finding": "no prior events-cli implementation decisions in memory \u2014 only eidetic's own roadmap surfaced; the three issues genuinely are the whole requirements baseline",
       "seeds": []
+    },
+    {
+      "id": "s12",
+      "surface": "challenge pass / adjacent-systems lens: live nova-mosquitto traffic (wildcard + $SYS probe)",
+      "finding": "2 connected clients (this probe + nova-nervous-system), zero live event traffic in an 8s window, only two retained nova/state/* values \u2014 nothing else on the box consumes the broker, so the migration orphans only the nova pair's own state",
+      "seeds": [
+        "c5"
+      ]
+    },
+    {
+      "id": "s13",
+      "surface": "challenge pass / hidden-dependencies lens: PyPI namespace (pypi.org/pypi/events/json)",
+      "finding": "PyPI 'Events' 0.5 owns import events; events-cli 0.7.0 ships the same top-level module \u2014 collision confirmed by probe, routed as q5 (user decision: rename vs document+guard)",
+      "seeds": []
+    },
+    {
+      "id": "s14",
+      "surface": "challenge pass / operations lens: docker compose + host tooling probes",
+      "finding": "Docker Compose v5.0.1 plugin present on spark-f8a9; host has no mosquitto_pub/mosquitto_sub, so issue #3's pub/sub acceptance round-trip runs via docker exec into the broker container (as this pass's probe did)",
+      "seeds": [
+        "c4"
+      ]
+    },
+    {
+      "id": "s15",
+      "surface": "challenge pass / failure-modes lens: localhost resolution (getent ahosts)",
+      "finding": "localhost resolves to 127.0.0.1 only on spark-f8a9, so the v4-only compose mapping cannot silently no-op a localhost-dialing client on this box; on dual-stack boxes a v6-first localhost could \u2014 client docs should prefer explicit 127.0.0.1",
+      "seeds": [
+        "c9"
+      ]
+    },
+    {
+      "id": "s16",
+      "surface": "challenge pass / concurrency lens: co-located client set",
+      "finding": "robot publisher + reTerminal bridge + ad-hoc CLI sessions share one loopback broker; MQTT client-id takeover would make same-id clients kick each other \u2014 seeded the unique-client-id requirement",
+      "seeds": [
+        "c29"
+      ]
+    },
+    {
+      "id": "s17",
+      "surface": "challenge pass / reversibility lens: nova rollback path",
+      "finding": "reachy_nova's docker-compose.nervous-system.yml remains on disk after the stack is stopped, so a one-command rollback exists during the cutover window \u2014 seeded the documented-rollback requirement",
+      "seeds": [
+        "c28"
+      ]
+    },
+    {
+      "id": "s18",
+      "surface": "challenge pass / security lens: compose mapping + upstream defaults",
+      "finding": "c4/c9 examined against the live anti-pattern and Mosquitto 2.0 defaults; clean beyond the exact-version-pin finding \u2014 the loopback mapping, anonymous-on-loopback posture and no-listener defaults hold as specified",
+      "seeds": [
+        "c27"
+      ]
     }
   ]
 }
