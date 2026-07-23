@@ -5,6 +5,68 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-07-23
+
+### Added
+
+- **`CLAUDE.md` initialized into a real runtime prompt** (`/init`), replacing the
+  `guild create` seed placeholder. It now states the thing no single file in the
+  repo revealed: the event/broker domain is **not implemented** — everything in
+  `events/` is the `culture-agent-template` scaffold, renamed — and points at
+  issues #1/#2/#3 as the requirements baseline. Documents the CLI architecture
+  (single registration point, the `_dispatch` exit-code translation, the
+  stable-contract modules), the design constraints that are expensive to
+  retrofit (one-registry/four-surfaces, `watch` not fitting request/response,
+  keeping the raw MQTT port first-class, explicit `127.0.0.1:1883:1883`, the
+  Mosquitto facts, Docker-free unit tests), the culture-vs-events-cli lane
+  boundary, and the contributor conventions carried over from the template
+  (version-bump-every-PR, `cicd`, `ask-colleague`, worktree location, memory
+  discipline). Also reconciles the seed's stale `backend: claude` claim against
+  `culture.yaml`'s actual `backend: colleague`.
+- **`events/cli/_prog.py`** — resolves the command name to name back at the
+  user, so remediation hints reference an invocation that actually exists. The
+  installed console script gets `events`; the documented no-install fallback
+  (`python -m events` from a checkout, where the console script is typically
+  absent) gets `python -m events`. Detection compares `sys.argv[0]` against
+  *this* package's `__main__.py` by full path — a basename check would match
+  every other `python -m` host, `python -m pytest` included. Consumed by
+  argparse's `prog` and by the `explain` catalog's unknown-path remediation.
+- **Two regression tests for the command-name contract** —
+  `test_prog_matches_installed_console_script` reads `[project.scripts]` from
+  `pyproject.toml` and asserts argparse's `prog` matches it, so the two can
+  never drift apart again; `test_explain_root_keys_both_resolve_to_same_entry`
+  pins that `explain events` and `explain events-cli` reach the same root entry
+  (the rubric gate's `explain_self` check calls the former).
+
+### Changed
+
+- **The CLI now calls itself `events`, the command that is actually installed.**
+  argparse's `prog` was `events-cli` — the PyPI distribution name — so `--help`
+  and every argparse error printed a command name that does not exist on PATH.
+  `prog`, the `learn` command map, the `explain` catalog, `doctor`'s status
+  line, and the `overview` / `cli overview` subjects all now say `events`. The
+  mesh nick stays `events-cli` (it is the `culture.yaml` suffix, deliberately
+  distinct from the console command), as does the distribution name.
+- **User-facing strings describe the event fabric instead of the template.** The
+  parser description, `learn` prose and JSON payload, and every `explain` entry
+  described this as "a clonable template for AgentCulture mesh agents" — the
+  first thing an agent consuming this CLI reads. They now describe the broker /
+  contract purpose and state plainly that the event surface is not built yet.
+  `learn --json` gains a `distribution` field so the dist name is still
+  machine-discoverable alongside the new `tool: "events"`.
+- **`README.md` rewritten** off the template's "make it your own" text, with the
+  scaffold status, the mesh lane boundary, and a working quickstart. Its
+  quickstart was broken: it invoked `uv run events-cli whoami`, which never
+  existed as a console script.
+
+### Fixed
+
+- Tests that pinned the old command spelling (`"usage: events-cli"`,
+  `"events-cli doctor"`, `payload["tool"] == "events-cli"`, the `overview`
+  subjects) updated to the real command name, and several loose `in` assertions
+  tightened to anchored `startswith` checks so `# events` can no longer pass by
+  matching `# events cli`.
+
 ## [0.6.1] - 2026-07-20
 
 ### Added

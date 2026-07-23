@@ -1,7 +1,7 @@
-"""``events-cli overview`` — read-only descriptive snapshot of the agent.
+"""``events overview`` — read-only descriptive snapshot of the agent.
 
 Describes the agent to an agent reader: identity (from culture.yaml), the verb
-surface, and the sibling-pattern artifacts this template carries. The shared
+surface, and the sibling-pattern artifacts this repo carries. The shared
 section/render helpers here are reused by the ``cli`` noun's ``overview`` (see
 :mod:`events.cli._commands.cli`).
 
@@ -90,7 +90,7 @@ def cmd_overview(args: argparse.Namespace) -> int:
     # `target` is accepted for rubric compatibility (descriptive verbs must not
     # hard-fail on a missing path) but overview describes this agent itself.
     emit_overview(
-        "events-cli",
+        "events",
         agent_sections(),
         json_mode=bool(getattr(args, "json", False)),
     )

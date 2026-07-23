@@ -1,4 +1,4 @@
-"""events-cli — agent-first CLI for an AgentCulture mesh agent."""
+"""events — the AgentCulture event fabric (distributed as ``events-cli``)."""
 
 from __future__ import annotations
 

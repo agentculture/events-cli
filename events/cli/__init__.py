@@ -27,6 +27,7 @@ import sys
 from events import __version__
 from events.cli._errors import EXIT_USER_ERROR, CliError
 from events.cli._output import emit_error
+from events.cli._prog import prog_name
 
 _ISSUES_URL = "https://github.com/agentculture/events-cli/issues"
 
@@ -70,8 +71,13 @@ def _build_parser() -> argparse.ArgumentParser:
     from events.cli._commands import whoami as _whoami_cmd
 
     parser = _CliArgumentParser(
-        prog="events-cli",
-        description="events-cli — a clonable template for AgentCulture mesh agents.",
+        # `prog` must match what the caller actually types, or --help and every
+        # argparse error name a command that does not exist. That is `events`
+        # when installed (`events-cli` is only the PyPI distribution name) and
+        # `python -m events` from a checkout — see events.cli._prog.
+        prog=prog_name(),
+        description="events — the AgentCulture event fabric: an MQTT broker fronted "
+        "as a CLI, an HTTP API and an MCP surface.",
     )
     parser.add_argument(
         "--version",

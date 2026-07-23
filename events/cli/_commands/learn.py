@@ -1,4 +1,4 @@
-"""``events-cli learn`` — the learnability affordance.
+"""``events learn`` — the learnability affordance.
 
 Prints a structured self-teaching prompt. Must satisfy the agent-first rubric:
 >=200 chars and mention purpose, command map, exit codes, --json, and explain.
@@ -12,23 +12,28 @@ from events import __version__
 from events.cli._output import emit_result
 
 _TEXT = """\
-events-cli — a clonable template for AgentCulture mesh agents.
+events — the AgentCulture event fabric.
 
 Purpose
 -------
-Scaffold for a new Culture mesh agent: an agent-first CLI (cited from the teken
-`python-cli` reference), an identity (culture.yaml + CLAUDE.md), the canonical
-guildmaster skill kit under .claude/skills/, and a deploy/CI baseline. Clone it,
-rename the package, and edit culture.yaml to mint a new agent.
+Runs and maintains a Dockerised Eclipse Mosquitto MQTT broker and fronts it as a
+CLI, an HTTP API and an MCP surface, so any app can import it, any service can
+call the API, and an agent or a human can publish and subscribe to events the
+same way. Mosquitto transports events; this tool defines what they mean — typed
+immutable envelopes, correlation and causation, durable history, pipeline runs.
+
+Status: the event and broker surface is NOT implemented yet. What ships today is
+the agent-first CLI below — identity and introspection. See the repository
+issues for the specification being built against.
 
 Commands
 --------
-  events-cli whoami             Identity from culture.yaml.
-  events-cli learn              This self-teaching prompt.
-  events-cli explain <path>...  Markdown docs for any noun/verb path.
-  events-cli overview           Descriptive snapshot of the agent.
-  events-cli doctor             Check the agent-identity invariants.
-  events-cli cli overview       Describe the CLI surface itself.
+  events whoami             Identity from culture.yaml.
+  events learn              This self-teaching prompt.
+  events explain <path>...  Markdown docs for any noun/verb path.
+  events overview           Descriptive snapshot of the agent.
+  events doctor             Check the agent-identity invariants.
+  events cli overview       Describe the CLI surface itself.
 
 Machine-readable output
 -----------------------
@@ -44,15 +49,21 @@ Exit-code policy
 
 More detail
 -----------
-  events-cli explain events-cli
+  events explain events
 """
 
 
 def _as_json_payload() -> dict[str, object]:
     return {
-        "tool": "events-cli",
+        # The command an agent actually invokes, not the distribution name.
+        "tool": "events",
+        "distribution": "events-cli",
         "version": __version__,
-        "purpose": "Clonable scaffold for a new AgentCulture mesh agent.",
+        "purpose": (
+            "The AgentCulture event fabric: a Dockerised Mosquitto MQTT broker fronted "
+            "as a CLI, an HTTP API and an MCP surface. The event and broker surface is "
+            "not implemented yet; today's verbs are identity and introspection only."
+        ),
         "commands": [
             {"path": ["whoami"], "summary": "Identity probe from culture.yaml."},
             {"path": ["learn"], "summary": "Self-teaching prompt."},
@@ -67,7 +78,7 @@ def _as_json_payload() -> dict[str, object]:
             "2": "environment/setup error",
         },
         "json_support": True,
-        "explain_pointer": "events-cli explain <path>",
+        "explain_pointer": "events explain <path>",
     }
 
 
