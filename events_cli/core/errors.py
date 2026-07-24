@@ -15,9 +15,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-# Every field-level reason the validator can emit. Declared once so callers can
-# switch on a stable slug instead of matching prose, and so a test can prove no
-# undeclared code escapes.
+# Every field-level reason a core validator can emit — the envelope validator
+# and (below) the topic-mapping validator in events_cli/core/topics.py both
+# draw from this one tuple. Declared once so callers can switch on a stable
+# slug instead of matching prose, and so a test can prove no undeclared code
+# escapes.
 ERROR_CODES: tuple[str, ...] = (
     "missing",  # required field absent from the payload
     "unknown_field",  # key that is not part of the envelope contract
@@ -32,6 +34,7 @@ ERROR_CODES: tuple[str, ...] = (
     "not_utc",  # a timestamp with a non-zero UTC offset
     "out_of_range",
     "unsupported_type",  # a value JSON cannot represent
+    "reserved_mqtt_char",  # a pattern used a raw MQTT wildcard/separator ('#', '+', '/')
 )
 
 # Field name used for problems with the document as a whole rather than one
@@ -89,6 +92,43 @@ class EnvelopeValidationError(EventsError):
         """JSON-ready shape for the ``--json`` surfaces."""
         return {
             "error": "envelope_validation",
+            "message": self.summary,
+            "errors": [err.to_dict() for err in self.errors],
+        }
+
+
+class TopicValidationError(EventsError):
+    """Raised when a type/topic/pattern string violates the topic-mapping contract.
+
+    Carries every problem as one or more :class:`FieldError` objects — the same
+    shape :class:`EnvelopeValidationError` uses — so a caller already switching
+    on field-level envelope errors needs no second error shape to handle. Kept
+    as its own class (rather than reusing :class:`EnvelopeValidationError`)
+    because a bad topic string is not an invalid envelope, and the two should
+    not be conflated in a caller's ``except`` clause or in the ``error`` key of
+    :meth:`to_dict`.
+    """
+
+    def __init__(
+        self,
+        errors: Iterable[FieldError],
+        *,
+        summary: str = "invalid topic",
+    ) -> None:
+        self.errors: tuple[FieldError, ...] = tuple(errors)
+        self.summary = summary
+        detail = "; ".join(str(err) for err in self.errors)
+        super().__init__(f"{summary}: {detail}" if detail else summary)
+
+    @property
+    def fields(self) -> tuple[str, ...]:
+        """The field names of the rejected values, in report order."""
+        return tuple(err.field for err in self.errors)
+
+    def to_dict(self) -> dict[str, Any]:
+        """JSON-ready shape for the ``--json`` surfaces."""
+        return {
+            "error": "topic_validation",
             "message": self.summary,
             "errors": [err.to_dict() for err in self.errors],
         }
