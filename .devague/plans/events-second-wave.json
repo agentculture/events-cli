@@ -1,0 +1,566 @@
+{
+  "slug": "events-second-wave",
+  "title": "events second wave",
+  "frame_slug": "events-second-wave",
+  "schema_version": 3,
+  "status": "exported",
+  "created": "2026-07-24T15:33:56Z",
+  "updated": "2026-07-24T16:10:29Z",
+  "targets": [
+    {
+      "id": "c1",
+      "kind": "announcement",
+      "text": "events-cli ships its second wave: the deferred arcs land on the first slice \u2014 the agentfront MCP+HTTP binding from the core registry (#6), durable identity-owned subscriptions with history and bounded cursor drain (#7), pipelines over the event graph (#8), shell-cli-routed stack verbs (#9), and dynsec identities with a documented remote-access opt-in (#10) \u2014 with issue #3 answered and closed"
+    },
+    {
+      "id": "h1",
+      "kind": "honesty",
+      "text": "The wave announcement is honest only arc-by-arc: the exported spec marks #6/#8/#9/#10 as deferred with issue links and claims nothing delivered beyond the opening arc \u2014 mirroring how the first-slice spec carried its own deferred rows"
+    },
+    {
+      "id": "c2",
+      "kind": "requirement",
+      "text": "Issue #3's two outstanding asks get an events-cli reply and the issue closes: the importable symbol is 'from events_cli import EventClient' (lazy PEP 562 re-export; events_cli.client defines it \u2014 their placeholder guess 'EventsClient' is one letter wrong and would degrade to a silent no-op), the constructor is EventClient(host='127.0.0.1', port=1883, *, client_id=..., connect=True) so connect() runs in the constructor by default, and the reTerminal bridge subscribes over raw loopback MQTT for this wave (client-side drain arrives with #7); acceptance is already recorded 10/10 in docs/acceptance/2026-07-24-issue-3-live-run.md"
+    },
+    {
+      "id": "h7",
+      "kind": "honesty",
+      "text": "The reply posted on #3 names EventClient, its import path, the constructor signature, connect-in-constructor, and the raw-MQTT subscribe answer for the reTerminal bridge; the issue is closed after the reply (or explicitly left open by the operator with the reason stated)"
+    },
+    {
+      "id": "c3",
+      "kind": "requirement",
+      "text": "Issue #9's reopen trigger has fired: shell-cli 0.13.x ships process.exec/process.shell behind a policy gate with persisted evidence records (its README Status section still claims no runner exists \u2014 stale against its own CHANGELOG), so the #9 evaluation of routing events up/down/logs/status through shell-cli is actionable now; any migration must keep StackError->CliError, exit code 2 for environment errors, and no traceback on stderr"
+    },
+    {
+      "id": "h8",
+      "kind": "honesty",
+      "text": "The #9 evaluation runs during this wave and its verdict \u2014 migrate or stay on subprocess, with reasons \u2014 is recorded on issue #9, not silently dropped"
+    },
+    {
+      "id": "c5",
+      "kind": "requirement",
+      "text": "Issue #7's cursor design must not assume total order on envelope ids: evt_ ids are Crockford ULIDs sortable at millisecond granularity only, with no intra-millisecond monotonicity (recorded on the events-first-slice frame) \u2014 the cursor must be store-assigned sequence, or the core must grow monotonic ids, before replay-from-cursor lands"
+    },
+    {
+      "id": "h9",
+      "kind": "honesty",
+      "text": "A test mints two envelope ids in the same millisecond and proves drain order equals store append order and cursor resume is exact \u2014 no ordering is ever derived from comparing ULIDs"
+    },
+    {
+      "id": "c6",
+      "kind": "requirement",
+      "text": "Issue #10's dynsec landing removes 'allow_anonymous true' from the generated mosquitto.conf \u2014 the template's own comment binds them ('when they land, this line goes away') \u2014 while keeping the anonymous co-located loopback path #3 depends on (REACHY_MQTT_URL=localhost:1883), and a stack-marked test must verify the dynsec plugin actually ships and initialises in eclipse-mosquitto:2.1.2-alpine (per_listener_settings is false, so auth settings are global)"
+    },
+    {
+      "id": "h10",
+      "kind": "honesty",
+      "text": "Deferred-arc condition: when #10 lands, the regenerated template drops allow_anonymous true, a stack-marked test proves the dynsec path in eclipse-mosquitto:2.1.2-alpine, and the anonymous co-located loopback lane #3 depends on still works; until then this wave keeps anonymous loopback"
+    },
+    {
+      "id": "c8",
+      "kind": "requirement",
+      "text": "The pyproject [project] description drift is fixed in the wave's first PR: it presently claims events-cli 'fronts it through agentfront as a CLI, an HTTP API and an MCP surface' in the present tense while #6 is unbuilt \u2014 prose ahead of code, exactly what CLAUDE.md's Known-drift rule exists for; reword to today's truth (or record in Known drift until #6 lands)"
+    },
+    {
+      "id": "h11",
+      "kind": "honesty",
+      "text": "The pyproject description on main no longer claims MCP/HTTP surfaces exist; the rewording rides the arc's first PR with its version bump"
+    },
+    {
+      "id": "c9",
+      "kind": "boundary",
+      "text": "The stable CLI contract survives every arc of the wave: _output.py stdout/stderr split and _errors.py exit codes stay frozen, the explain catalog keeps BOTH ('events',) and ('events-cli',) root keys, no traceback ever reaches stderr, and every new verb (watch, pipeline, dynsec-facing) goes through register(sub) plus a catalog entry with non-infinite --max/--timeout defaults \u2014 the rubric gate and pinned tests are the enforcement"
+    },
+    {
+      "id": "h12",
+      "kind": "honesty",
+      "text": "The rubric gate (agentfront cli doctor --strict) and the pinned contract tests \u2014 dual catalog root keys, prog resolution, stdout/stderr split, exit codes \u2014 pass unchanged on every PR of the arc; enforcement is CI, not intention"
+    },
+    {
+      "id": "c10",
+      "kind": "boundary",
+      "text": "docs/contract.md's 'What is built, and what is not' table is updated in the same PR as each arc that lands \u2014 it is currently honest (watch/pipeline verbs absent, dynsec listed 'not built \u2014 #10'), and keeping it honest is part of each arc's definition of done, not a trailing docs task"
+    },
+    {
+      "id": "h13",
+      "kind": "honesty",
+      "text": "Each landing PR touches docs/contract.md's built/not-built table in the same change that adds the surface \u2014 a PR adding a verb without the table update does not merge"
+    },
+    {
+      "id": "c13",
+      "kind": "audience",
+      "text": "Consumers of the contract lane who need bounded, resumable consumption: agents draining events inside a turn (the MCP/HTTP shape #6 will derive later), humans and scripts on the events CLI, and services importing events_cli \u2014 first on spark-f8a9. Producer-owned raw trees (reachy/*) keep raw MQTT and are unaffected"
+    },
+    {
+      "id": "h14",
+      "kind": "honesty",
+      "text": "The named consumers are real: the drain shape serves an agent turn within bounded time (proven by the --timeout tests), and reachy's raw-MQTT lane is untouched by the arc's diff"
+    },
+    {
+      "id": "c14",
+      "kind": "after_state",
+      "text": "events-cli has a consume side: named durable subscriptions survive broker and consumer restarts; 'events watch <sub> --since <cursor> --max N --timeout S' returns a bounded batch plus a cursor with nothing acknowledged lost; 'events emit/get/list' round-trip envelope events through the contract lane; drained history lives in a store that survives stack restarts \u2014 #1's emit-and-watch acceptance items are met for the event plane"
+    },
+    {
+      "id": "h15",
+      "kind": "honesty",
+      "text": "Every element of the after-state is mechanically checkable via the stack-marked suite: survive-restart, bounded drain, cursor resume, and the emit-to-watch round-trip \u2014 nothing rests on a judgment call"
+    },
+    {
+      "id": "c15",
+      "kind": "before_state",
+      "text": "Today the fabric is publish-only: EventClient publishes, the reTerminal bridge subscribes over raw MQTT, and there is no subscribe/drain/history surface at all \u2014 'events watch' does not exist, a contract-lane consumer that restarts loses everything published while it was away, and no store holds event history"
+    },
+    {
+      "id": "h16",
+      "kind": "honesty",
+      "text": "The before-state is evidence, not narrative: at the pre-arc HEAD, events_cli contains no subscribe/consume/store code and no watch/emit/get/list/sub verb exists in the parser or the explain catalog"
+    },
+    {
+      "id": "c16",
+      "kind": "success_signal",
+      "text": "Stack-marked proof on spark-f8a9: create a subscription, publish N envelopes while no drainer is connected, restart the broker, then drain \u2014 all N arrive in order within --timeout with a cursor; resuming from that cursor returns nothing already acknowledged; a second CLI process watches what the first emits; the default pytest selection stays dockerless throughout"
+    },
+    {
+      "id": "h17",
+      "kind": "honesty",
+      "text": "The success signal runs as an executable script or marked test on spark-f8a9 with observable output per item, exiting non-zero on any failure \u2014 a gate, not a demo, like scripts/acceptance-issue-3.sh"
+    },
+    {
+      "id": "c17",
+      "kind": "requirement",
+      "text": "Durable subscriptions are MQTT persistent sessions, not a resident control service: 'events sub add <name> <pattern>' registers a broker-side persistent session (clean_start=false, QoS 1, session expiry effectively infinite) subscribed to the pattern's topic filter, so the broker's existing persistence (persistence true + volume + autosave 60) buffers the backlog while no drainer is connected \u2014 no always-on control-service container ships in this arc (the resident service becomes #8's concern when pipelines need active run advancement); the undrained-backlog bound (max_queued_messages) is set explicitly in the generated mosquitto.conf and documented"
+    },
+    {
+      "id": "h2",
+      "kind": "honesty",
+      "text": "A stack-marked test proves the architecture: sub add, publish N envelopes with no drainer connected, docker restart of the broker, then drain returns all N in order \u2014 and the generated mosquitto.conf sets max_queued_messages explicitly with the bound documented in docs/contract.md"
+    },
+    {
+      "id": "c18",
+      "kind": "requirement",
+      "text": "'events watch <sub> --since <cursor> --max N --timeout S' drains: resume the session, consume up to --max, append to the history store, acknowledge, return the batch plus the next cursor; defaults are non-infinite (--max 100, --timeout 30) and there is no unbounded --follow in this arc"
+    },
+    {
+      "id": "h3",
+      "kind": "honesty",
+      "text": "A drain call returns within its --timeout with at most --max events plus a cursor; resuming from the returned cursor re-delivers nothing acknowledged; drain/cursor logic is tested pure and dockerless, the broker path behind the stack marker"
+    },
+    {
+      "id": "c19",
+      "kind": "requirement",
+      "text": "'events emit <type> --data <file|->' validates through the core envelope (generated id/time) and publishes QoS 1 to the canonical topic via EventClient; 'events get <event-id>' and 'events list --type <t> --max N' read drained history from the store \u2014 every verb with --json, registered via register(sub) with catalog entries"
+    },
+    {
+      "id": "h4",
+      "kind": "honesty",
+      "text": "Two CLI processes demonstrate the emit-to-watch round-trip on a live stack (stack-marked); get/list return drained envelopes by id and type with --json; envelope validation and store logic keep their coverage in the default dockerless selection"
+    },
+    {
+      "id": "c20",
+      "kind": "requirement",
+      "text": "The canonical transport mapping is defined and documented in docs/contract.md: envelope events publish to 'events/<type with dots as topic-level separators>' and a subscription pattern like 'task.*' compiles to the matching MQTT filter \u2014 topic names stay a transport detail per #1, the dotted type stays the contract, and producer-owned trees stay outside the mapping"
+    },
+    {
+      "id": "h5",
+      "kind": "honesty",
+      "text": "The type-to-topic and pattern-to-filter mapping is pure and tested dockerless in both directions; docs/contract.md documents it; and a test proves reachy/* topics are not captured by contract-lane subscription patterns"
+    },
+    {
+      "id": "c21",
+      "kind": "requirement",
+      "text": "Every subscription records an owner identity as a declared name (default resolved from culture.yaml nick, falling back to the client id) \u2014 unauthenticated on loopback in this arc, forward-compatible with #10's dynsec so identity-owned subscriptions gain real authentication without a schema change"
+    },
+    {
+      "id": "h6",
+      "kind": "honesty",
+      "text": "Every subscription record carries its owner; 'events sub list --json' shows it; and the record schema needs no migration when #10 lands (the dynsec identity name is the owner name)"
+    },
+    {
+      "id": "c22",
+      "kind": "boundary",
+      "text": "This arc delivers #7 plus the riders (the #3 reply/close and the pyproject description fix) only: no agentfront MCP/HTTP (#6), no pipelines (#8), no shell-cli migration (#9 \u2014 its evaluation verdict is recorded on the issue separately), no dynsec (#10), no SSE/websocket streaming \u2014 each deferred arc lands per its own issue contract, mirroring the first-slice precedent"
+    },
+    {
+      "id": "h18",
+      "kind": "honesty",
+      "text": "The arc's PRs add no agentfront-binding, pipeline, dynsec or SSE code; the deferred issues stay open with their contracts intact; the arc's diff contains no surface from #6/#8/#10"
+    },
+    {
+      "id": "c23",
+      "kind": "requirement",
+      "text": "The stack-marked integration suite runs against an isolated scratch stack \u2014 its own compose project/container name, host port, volume and stack dir (EVENTS_STACK_DIR override) \u2014 and never restarts the production events-mosquitto, which serves the robot's nervous system live on this box; applying the template change (max_queued_messages) to the spark-f8a9 broker is a documented service window with rollback, like the first slice's cutover"
+    },
+    {
+      "id": "h19",
+      "kind": "honesty",
+      "text": "The integration suite's setup provably targets its own compose project name, port and volume (asserted in the tests themselves), events-mosquitto's uptime is unbroken by a full suite run, and the live template rollout is recorded as a service window with a rehearsed rollback in docs/acceptance/"
+    },
+    {
+      "id": "c24",
+      "kind": "boundary",
+      "text": "History captures only what a registered subscription's persistent session queued: events emitted before any subscription exists, or published at QoS 0, are transported but never captured \u2014 there is no global capture until #8's control service; docs/contract.md states this so no consumer assumes 'events list' is a complete log"
+    },
+    {
+      "id": "h20",
+      "kind": "honesty",
+      "text": "docs/contract.md states the capture boundary in its own section, and a stack test proves an event published before 'sub add' is absent from a later drain while one published after is present"
+    },
+    {
+      "id": "c25",
+      "kind": "requirement",
+      "text": "Backlog overflow semantics are documented from evidence, not assumption: mosquitto 2.1.2's default bound is 1000 queued messages per offline session and overflow drops the NEWEST messages silently (probe: 1200 published offline, exactly m00000-m00999 delivered in order; one broker log notice) \u2014 the template sets max_queued_messages explicitly, contract.md documents drop-newest, and the watch/drain docs point at 'events logs' for the drop notice"
+    },
+    {
+      "id": "h21",
+      "kind": "honesty",
+      "text": "A stack test publishes bound+K messages to an offline subscription and proves exactly 'bound' oldest messages arrive in order; the template carries max_queued_messages with a comment stating drop-newest; contract.md documents it"
+    },
+    {
+      "id": "c26",
+      "kind": "requirement",
+      "text": "Concurrent drains of one subscription are MQTT session takeover (the broker kicks the first drainer; observed and logged by the probe): persist-then-ack plus store dedupe on event id makes takeover lose nothing, and contract.md documents single-drainer-per-subscription semantics"
+    },
+    {
+      "id": "h22",
+      "kind": "honesty",
+      "text": "A stack test starts drain A, starts drain B on the same subscription, and proves the store holds every event exactly once afterwards; contract.md documents single-drainer semantics"
+    },
+    {
+      "id": "c27",
+      "kind": "requirement",
+      "text": "Durable capture requires QoS 1 publishes and the docs must say so: EventClient.publish AND publish_event default to qos=0, so an importable-client producer publishing envelopes with defaults silently bypasses durable capture \u2014 'events emit' publishes qos=1 explicitly, and the client docstrings + contract.md state that QoS 0 bypasses capture"
+    },
+    {
+      "id": "h23",
+      "kind": "honesty",
+      "text": "'events emit' passes qos=1 explicitly (unit-asserted); client.py docstrings and contract.md both state that QoS 0 publishes bypass durable capture"
+    },
+    {
+      "id": "c28",
+      "kind": "requirement",
+      "text": "The history store is per-host like the stack itself: it lives beside the stack state (default_stack_dir's XDG convention, honouring an env override), never CWD-relative \u2014 'events list' answers the same from any directory \u2014 and every stored record carries a store-format version marker so a future migration has something to key on"
+    },
+    {
+      "id": "h24",
+      "kind": "honesty",
+      "text": "'events list' returns identical results from two different CWDs against the same host stack (test); stored records carry the format-version field from the first write"
+    },
+    {
+      "id": "c29",
+      "kind": "requirement",
+      "text": "Subscription names and patterns are validated at the boundary: names are slugs, patterns use the dotted-type grammar with '*' only, and raw MQTT filter characters (#, +, /) are rejected with a field-level error \u2014 a pattern can never escape the events/ topic prefix"
+    },
+    {
+      "id": "h25",
+      "kind": "honesty",
+      "text": "Unit tests reject '#', 'a/+', 'a/b', '../x' and empty patterns with field-level errors, dockerless; the compiled filter is always prefixed events/"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "t1",
+      "summary": "Reply to issue #3 naming the client symbol and subscribe story, then close it",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "The comment on #3 states the import path 'from events_cli import EventClient', the constructor signature with defaults (host='127.0.0.1', port=1883, client_id auto-unique per process, connect=True so connect() runs in the constructor), and that the reTerminal bridge subscribes over raw loopback MQTT until #7's drain ships; signed '- events-cli (Claude)'",
+        "Issue #3 is closed after the reply, or left open with the operator's stated reason in the same thread"
+      ],
+      "deps": [],
+      "covers": [
+        "c2",
+        "h7"
+      ],
+      "instruction": "Post one comment on #3 answering both asks verbatim from code on main: import path 'from events_cli import EventClient' (PEP 562 lazy re-export in events_cli/__init__.py; events_cli.client defines it), constructor EventClient(host='127.0.0.1', port=1883, *, client_id=None->auto-unique, connect=True so connect() runs in the constructor), will/availability_topic kwargs for LWT, and: the reTerminal bridge subscribes over raw loopback MQTT until #7's drain ships. Let the communicate-skill script sign it; then close the issue (or record the operator's leave-open reason in-thread)."
+    },
+    {
+      "id": "t2",
+      "summary": "Fix the pyproject description drift and carry the arc's version bump",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "The [project] description no longer claims HTTP or MCP surfaces exist; the reword rides the arc's first PR with a version-bump-skill bump and CHANGELOG entry; agentfront cli doctor --strict still passes"
+      ],
+      "deps": [],
+      "covers": [
+        "c8",
+        "h11"
+      ],
+      "instruction": "Use the version-bump skill (minor \u2014 the arc adds verbs); reword [project] description in pyproject.toml to today's truth (Dockerised Mosquitto stack + agent-first CLI + importable client; agentfront MCP/HTTP tracked as #6), keeping the three-name split note intact; CHANGELOG entry under Changed; agentfront cli doctor --strict must still pass"
+    },
+    {
+      "id": "t3",
+      "summary": "Run the #9 shell-cli evaluation and record the verdict on the issue",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "Issue #9 carries a comment recording the verdict (migrate or stay on stdlib subprocess) with concrete reasons referencing shell-cli 0.13.x's shipped surface (process.exec/process.shell, policy gate, evidence records); if 'stay', the revisit conditions are stated"
+      ],
+      "deps": [],
+      "covers": [
+        "c3",
+        "h8"
+      ],
+      "instruction": "Read shell-cli's CHANGELOG 0.13.x and shell/cli/_commands/{operation,policy}.py; weigh plan/authorize/execute/observe/record + evidence records against stack.py's fixed, non-user-interpolated argv via events_cli/stack/_docker.run; the likely verdict is 'stay, revisit when a container runner lands' \u2014 but write whichever the evidence supports on #9, with the revisit conditions, via the communicate skill"
+    },
+    {
+      "id": "t4",
+      "summary": "Canonical topic mapping module: type-to-topic and pattern-to-filter, pure",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "events_cli/core/topics.py maps task.requested -> events/task/requested and compiles task.* -> events/task/+ with documented wildcard semantics; topic-to-type round-trips; a test proves reachy/# and reachy/state/# are never matched by contract-lane filters; stdlib-only, tests dockerless"
+      ],
+      "deps": [],
+      "covers": [
+        "c20",
+        "h5"
+      ],
+      "instruction": "New stdlib-only module events_cli/core/topics.py: type_to_topic (task.requested -> events/task/requested), topic_to_type (inverse), pattern_to_filter (task.* -> events/task/+; '*' matches exactly one dotted segment); reuse core.envelope's type validation for segments; raw MQTT filter chars in a pattern raise the core FieldError shape; tests/test_topics.py dockerless including the reachy/# exclusion proof"
+    },
+    {
+      "id": "t5",
+      "summary": "Store evaluation spike: data_refinery.store vs eidetic-cli vs minimal fallback",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "A written verdict (docs/ note + issue #7 comment) evaluates both siblings against: ordered append with store-assigned sequence, read-since-cursor, get-by-id, list-by-type, restart survival, dependency posture; it names the chosen backend and the rejection reasons; a bespoke-minimal JSONL log is chosen only if both fail the criteria with reasons recorded"
+      ],
+      "deps": [],
+      "covers": [],
+      "instruction": "Read data_refinery.store source (put/get/list/migrate, files backend) and eidetic-cli's remember/recall surface; score each against: ordered append + store-assigned per-sub sequence, read-since-cursor, get-by-id, list-by-type, restart survival, base-dependency posture; write the verdict doc (docs/ + a comment on #7); write NO store code in this task"
+    },
+    {
+      "id": "t6",
+      "summary": "History store seam with store-assigned per-subscription cursor",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "events_cli/history/ exposes append(envelope, sub)->seq, read(sub, since, max), get(id), list(type, max) behind a backend seam implementing t5's verdict; the sequence is store-assigned and monotonic per subscription; append dedupes on envelope id",
+        "A test mints two envelope ids in the same millisecond and proves read order equals append order and cursor resume is exact \u2014 no ordering derived from ULID comparison; all tests dockerless",
+        "The store lives beside the per-host stack state (never CWD-relative; env-overridable) and every record carries a store-format version field; 'events list' returns identical results from two different CWDs against the same host stack (test)"
+      ],
+      "deps": [
+        "t5"
+      ],
+      "covers": [
+        "c5",
+        "h9",
+        "c28",
+        "h24"
+      ],
+      "instruction": "New package events_cli/history/ implementing t5's verdict behind one seam module; store root defaults beside the per-host stack state (follow default_stack_dir's XDG pattern with an env override), never CWD; records carry storeFormatVersion from the first write; append(envelope, sub) assigns the monotonic per-sub seq and dedupes on envelope id; include the same-millisecond ULID ordering test (h9)"
+    },
+    {
+      "id": "t7",
+      "summary": "Subscription registry and MQTT persistent-session lifecycle",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "Subscription records carry name, pattern, owner (default culture.yaml nick, fallback client id), created; 'events sub list --json' shows owner; the record schema needs no migration when #10 adds dynsec (identity name == owner name)",
+        "sub add establishes an MQTT persistent session (clean_start=false, QoS 1 subscribe on the compiled filter, session expiry set to the documented value) and disconnects leaving the session live in the broker; sub remove destroys the session; paho stays lazily imported; lifecycle unit-tested against a fake client, dockerless",
+        "Subscription names must be slugs and patterns must match the dotted-type grammar ('*' only): '#', '+', '/', '..' and empty are rejected with field-level errors (dockerless tests); compiled filters are always events/-prefixed"
+      ],
+      "deps": [
+        "t4",
+        "t6"
+      ],
+      "covers": [
+        "c17",
+        "c21",
+        "h6",
+        "c29",
+        "h25"
+      ],
+      "instruction": "New package events_cli/subs/: registry records live in the history store dir (from t6); lifecycle over lazy paho import \u2014 MQTT5, clean_start=False, CONNECT SessionExpiryInterval=0xFFFFFFFF, QoS 1 subscribe on the compiled filter, then graceful disconnect leaving the session live; sub remove connects clean_start=True (or expiry 0) to destroy it; owner default = culture.yaml nick via the whoami line scanner, fallback client id; name/pattern validation per c29 rejecting #,+,/ with field-level errors; fake-client unit tests only"
+    },
+    {
+      "id": "t8",
+      "summary": "Drain engine: resume, consume bounded, persist-then-ack, return cursor",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "The drain resumes the session with manual acknowledgement, persists each event to the history store BEFORE acking it, stops at --max or --timeout, and returns the batch plus the next cursor; broker-unreachable surfaces as a named error mappable to CliError exit 2",
+        "Drain/cursor logic is tested pure and dockerless with a fake client; the live-broker path is deferred to the stack-marked suite"
+      ],
+      "deps": [
+        "t7"
+      ],
+      "covers": [
+        "c18",
+        "h3"
+      ],
+      "instruction": "Drain module under events_cli/subs/: paho Client(manual_ack=True) (probe-verified in paho 2.x) with manual_ack_set; persist each message to the history store BEFORE client.ack(); stop at --max or a monotonic-clock --timeout deadline; return batch + next cursor from the store's seq; broker-unreachable raises a named SubsError the CLI maps to exit 2; fake-client tests dockerless \u2014 live-broker paths belong to t12"
+    },
+    {
+      "id": "t9",
+      "summary": "CLI verbs: events sub add/list/show/remove and events watch",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "All verbs registered via register(sub) with catalog entries and --json; watch defaults are --max 100 --timeout 30 and no --follow flag exists; errors are CliError with remediation; the rubric gate and pinned contract tests pass unchanged"
+      ],
+      "deps": [
+        "t8"
+      ],
+      "covers": [
+        "c18"
+      ],
+      "instruction": "New modules events_cli/cli/_commands/sub.py and watch.py; register both at the marked insertion point in cli/__init__.py; every path gets an explain-catalog entry (test_every_catalog_path_resolves enforces); watch defaults --max 100 --timeout 30, no --follow; SubsError -> CliError with remediation hints naming the exact next command via _prog; run agentfront cli doctor . --strict before calling it done"
+    },
+    {
+      "id": "t10",
+      "summary": "CLI verbs: events emit, events get, events list",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "emit <type> --data <file|-> validates via the core envelope (generated id/time) and publishes QoS 1 to the canonical topic via EventClient, rejecting an invalid envelope with field-level errors before any publish; get <event-id> and list --type --max read drained history from the store; all three carry catalog entries and --json",
+        "EventClient.publish_event defaults to qos=1 (behaviour change per resolved q3: CHANGELOG-noted, regression-tested; reachy's publish() raw lane unaffected); 'events emit' asserts qos=1; client docstrings state QoS 0 bypasses durable capture"
+      ],
+      "deps": [
+        "t9"
+      ],
+      "covers": [
+        "c19",
+        "c27"
+      ],
+      "instruction": "New modules emit.py + get.py + list.py under _commands with catalog entries; emit validates via Envelope.from_dict FIRST (field-level errors, no publish on failure) then publishes qos=1 via EventClient and prints the PublishResult; get/list read the history store; ALSO in this task: flip client.py publish_event default to qos=1 (resolved q3) with a regression test and a CHANGELOG behaviour note; state in client docstrings that QoS 0 bypasses durable capture"
+    },
+    {
+      "id": "t11",
+      "summary": "Template and contract docs: backlog bound and the consume side",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "The generated mosquitto.conf sets max_queued_messages explicitly with a comment stating the undrained-backlog bound; template tests updated; events init --force regenerates cleanly",
+        "docs/contract.md documents the consume side: the canonical topic mapping, the backlog bound, cursor-drain semantics, and the built/not-built table rows flip for sub/watch/emit/get/list in the same PR that adds them",
+        "docs/contract.md gains the capture-boundary section (registered-subscription QoS-1 traffic only; no global log until #8), documents drop-newest overflow at the explicit max_queued_messages bound with the 'events logs' notice pointer, and single-drainer/takeover semantics"
+      ],
+      "deps": [
+        "t4"
+      ],
+      "covers": [
+        "c10",
+        "h2",
+        "c24",
+        "h20",
+        "c25",
+        "h23"
+      ],
+      "instruction": "Edit stack/templates/mosquitto.conf: add max_queued_messages (explicit value; comment states drop-NEWEST overflow citing the 2026-07-24 probe) next to the persistence block; update tests/test_stack_templates.py; docs/contract.md: canonical topic mapping, the capture boundary (registered QoS-1 traffic only, no global log until #8), overflow + 'events logs' notice pointer, single-drainer/takeover semantics, and flip the built/not-built rows for sub/watch/emit/get/list"
+    },
+    {
+      "id": "t12",
+      "summary": "Stack-marked integration suite for the persistent-session architecture",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "Stack-marked tests prove: publish N envelopes with no drainer, docker restart of the broker, then drain returns all N in order; a drain returns within --timeout with at most --max events plus a cursor and resuming re-delivers nothing acknowledged; two CLI processes complete an emit-to-watch round-trip; a reachy/* publish is not captured by a contract-lane subscription",
+        "The default pytest selection still passes on a machine with no docker and no broker",
+        "The suite asserts its own isolation (own compose project/port/volume/stack dir; events-mosquitto uptime unbroken by a full run); an overflow test proves exactly-bound oldest-first delivery; a takeover test proves the store holds every event exactly once after concurrent drains; a capture-boundary test proves pre-registration events are absent from drains"
+      ],
+      "deps": [
+        "t9",
+        "t10",
+        "t11"
+      ],
+      "covers": [
+        "h2",
+        "h3",
+        "h4",
+        "c14",
+        "h15",
+        "c23",
+        "h21",
+        "c26",
+        "h22"
+      ],
+      "instruction": "Extend tests/test_stack_integration.py behind the stack marker: the suite builds its own stack in a temp EVENTS_STACK_DIR with its own compose project name, a port other than 1883, and its own volume, and asserts events-mosquitto's container uptime is unchanged around the run; add the overflow test (publish bound+K offline, drain exactly bound oldest-first), the takeover test (two concurrent drains, store holds every event exactly once), and the capture-boundary test (pre-registration event absent from a drain); default selection must stay green with no docker"
+    },
+    {
+      "id": "t13",
+      "summary": "Acceptance gate script and live run on spark-f8a9",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "scripts/acceptance-second-wave.sh exits non-zero on any failing check and covers every success-signal item; the live run on spark-f8a9 is recorded in docs/acceptance/ with observable output per item",
+        "The record captures the before-state evidence (no consume verbs or store code at pre-arc HEAD) and marks #6/#8/#9/#10 deferred with issue links \u2014 the wave claim stays arc-by-arc honest",
+        "The live template rollout on spark-f8a9 is a recorded service window with a rehearsed rollback in docs/acceptance/, following the first slice's cutover discipline"
+      ],
+      "deps": [
+        "t12"
+      ],
+      "covers": [
+        "c1",
+        "h1",
+        "c13",
+        "h14",
+        "c15",
+        "h16",
+        "c16",
+        "h17",
+        "h19"
+      ],
+      "instruction": "Model scripts/acceptance-second-wave.sh on acceptance-issue-3.sh: per-check observable output, non-zero exit on any failure, covering every success-signal item including cursor-resume and restart-survival; the live run needs an operator-scheduled service window (robot downtime) with the template rollout and a rehearsed rollback; record in docs/acceptance/ with before-state evidence (no consume verbs at pre-arc HEAD) and deferred-arc links"
+    },
+    {
+      "id": "t14",
+      "summary": "Deferred-arc hygiene ledger at arc close",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "Issues #6/#8/#10 remain open with their contracts intact and the arc's diff contains no agentfront-binding, pipeline, dynsec or SSE code; #9 carries its recorded verdict",
+        "Every PR of the arc passed the rubric gate and the pinned contract tests, and touched docs/contract.md whenever it added a surface; the delivery record notes the dynsec deferred condition (the template comment still binds allow_anonymous removal to #10)"
+      ],
+      "deps": [
+        "t13"
+      ],
+      "covers": [
+        "c6",
+        "h10",
+        "c9",
+        "h12",
+        "h13",
+        "c22",
+        "h18"
+      ],
+      "instruction": "Close-of-arc ledger: verify #6/#8/#10 open with contracts intact and grep the arc's full diff for absence of agentfront/pipeline/dynsec/SSE surface; verify #9 carries its verdict and #3 is closed; link the green CI runs proving the rubric gate + pinned tests per PR; confirm docs/contract.md rows flipped in the surface-adding PRs; update CLAUDE.md's as-built sections (consume side now exists) and note the dynsec deferred condition in the delivery record"
+    }
+  ],
+  "risks": [
+    {
+      "id": "r1",
+      "text": "mosquitto 2.1.2 session-expiry semantics: paho must send a session-expiry-interval on CONNECT and the broker may cap it (max_session_expiry_interval); if effectively-infinite sessions are capped, sub add re-arms expiry on each drain and the real bound is documented \u2014 verify live in t12",
+      "kind": "unknown_nonblocking",
+      "task_id": "t7",
+      "resolved": false,
+      "resolution": ""
+    },
+    {
+      "id": "r2",
+      "text": "paho v2 manual-ack behaviour for QoS 1 persist-then-ack: verify the client exposes it as the drain design assumes; the fallback is a documented store-then-ack discipline inside on_message",
+      "kind": "unknown_nonblocking",
+      "task_id": "t8",
+      "resolved": false,
+      "resolution": ""
+    },
+    {
+      "id": "r3",
+      "text": "Closing #3 may wait on reachy-mini-cli acknowledging the reply; the arc does not gate on their response",
+      "kind": "unknown_nonblocking",
+      "task_id": "t1",
+      "resolved": false,
+      "resolution": ""
+    },
+    {
+      "id": "r4",
+      "text": "--follow streaming and the SSE lane return at #6-time (parked on the frame as v2/v3)",
+      "kind": "follow_up",
+      "task_id": null,
+      "resolved": false,
+      "resolution": ""
+    }
+  ]
+}

@@ -276,6 +276,28 @@ def test_mosquitto_conf_sets_an_explicit_autosave_interval(mosquitto_conf: str) 
     assert 0 < seconds <= 300
 
 
+def test_mosquitto_conf_sets_an_explicit_backlog_bound(mosquitto_conf: str) -> None:
+    """The undrained-backlog bound must never be left as an inherited default.
+
+    Mirrors how ``test_compose_pins_an_exact_patch_tag`` guards the image tag
+    against a floating default: a 2026-07-24 probe against this exact template
+    showed the unconfigured default queues exactly 1000 QoS>0 messages for an
+    offline persistent session and silently drops the newest arrivals once
+    full, so the bound must be written down explicitly rather than inherited.
+    """
+    queued = [d for d in _directives(mosquitto_conf) if d.startswith("max_queued_messages ")]
+    assert len(queued) == 1
+    limit = int(queued[0].split()[1])
+    assert limit > 0
+
+    prose = _prose(mosquitto_conf)
+    assert "2026-07-24" in prose
+    assert "max_queued_messages" in prose
+    assert "newest" in prose
+    assert "dropped" in prose
+    assert "events logs" in prose
+
+
 # --- criterion 2: the comments document version-specific defaults ----------
 
 

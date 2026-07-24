@@ -101,6 +101,12 @@ def test_retained_and_qos_reach_paho(dead_port: int, monkeypatch: pytest.MonkeyP
 def test_publish_event_serialises_the_envelope_wire_form(
     dead_port: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Proves the wire-form serialisation only.
+
+    ``qos`` is passed explicitly here so this test keeps passing regardless of
+    ``publish_event``'s own default; the default itself is pinned separately
+    below (``test_publish_event_defaults_to_qos_1``).
+    """
     import paho.mqtt.client as mqtt
 
     env = Envelope.new("head.moved", "app://reachy-mini-cli", data={"angle": 12})
@@ -112,11 +118,59 @@ def test_publish_event_serialises_the_envelope_wire_form(
 
     with EventClient("127.0.0.1", dead_port) as client:
         monkeypatch.setattr(client._paho, "publish", spy)
-        client.publish_event(env, "reachy/events/head/moved")
+        client.publish_event(env, "reachy/events/head/moved", qos=0)
     assert seen["topic"] == "reachy/events/head/moved"
     assert seen["payload"] == env.to_json()
     assert seen["qos"] == 0
     assert seen["retain"] is False
+
+
+# --- the qos=1 behaviour change (q3): publish_event only, publish untouched --
+
+
+def test_publish_event_defaults_to_qos_1(dead_port: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The q3 behaviour change: ``publish_event`` now defaults to qos=1.
+
+    An envelope published at QoS 0 is never queued for an offline persistent
+    session at all, so it silently bypasses durable capture — the exact trap
+    this default now closes. Regression test for the flip; see
+    ``CHANGELOG.md`` (0.10.0, Changed) and the ``publish_event`` docstring.
+    """
+    import paho.mqtt.client as mqtt
+
+    env = Envelope.new("task.requested", "agent://builder", data={})
+    seen: dict = {}
+
+    def spy(topic, payload=None, qos=0, retain=False, properties=None):
+        seen.update(qos=qos)
+        return mqtt.MQTTMessageInfo(1)
+
+    with EventClient("127.0.0.1", dead_port) as client:
+        monkeypatch.setattr(client._paho, "publish", spy)
+        client.publish_event(env, "events/task/requested")  # no qos kwarg: the default
+    assert seen["qos"] == 1
+
+
+def test_publish_still_defaults_to_qos_0(dead_port: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The raw lane (``reachy-mini-cli``'s 50 Hz control loop) is unaffected by q3.
+
+    Only ``publish_event`` (the envelope lane) changed its default; the plain
+    ``publish`` a co-located producer calls directly must keep defaulting to
+    qos=0 (drop-don't-block), or a real-time loop could start blocking on
+    acknowledgements it never asked for.
+    """
+    import paho.mqtt.client as mqtt
+
+    seen: dict = {}
+
+    def spy(topic, payload=None, qos=0, retain=False, properties=None):
+        seen.update(qos=qos)
+        return mqtt.MQTTMessageInfo(1)
+
+    with EventClient("127.0.0.1", dead_port) as client:
+        monkeypatch.setattr(client._paho, "publish", spy)
+        client.publish("reachy/events/head/moved", "{}")  # no qos kwarg: the default
+    assert seen["qos"] == 0
 
 
 # --- Last Will / availability ----------------------------------------------
@@ -464,3 +518,113 @@ def test_two_default_clients_connect_without_kicking_each_other() -> None:
     finally:
         a.close()
         b.close()
+
+
+# --- the optional delivery confirmation (`wait`) ----------------------------
+#
+# `wait` exists for ONE-SHOT callers such as `events emit`, and must stay off by
+# default: paho's `loop_stop` docstring is explicit that stopping the loop does
+# not guarantee a queued PUBLISH was sent, so a process that publishes and exits
+# has to wait — while the 50 Hz control loop this client was built for must
+# never block at all. Both halves are pinned here, with no socket.
+
+
+class _FakeInfo:
+    """A stand-in for paho's ``MQTTMessageInfo``. Records whether it was waited on."""
+
+    def __init__(self, *, rc, published: bool) -> None:
+        self.rc = rc
+        self.mid = 7
+        self._published = published
+        self.waited_for: float | None = None
+
+    def wait_for_publish(self, timeout=None) -> None:
+        # Real paho returns silently on expiry, so the answer must come from
+        # is_published() rather than from the absence of an exception.
+        self.waited_for = timeout
+
+    def is_published(self) -> bool:
+        return self._published
+
+
+def _success_rc(client: EventClient):
+    return client._mqtt.MQTTErrorCode.MQTT_ERR_SUCCESS
+
+
+def test_publish_does_not_wait_by_default() -> None:
+    """The hot lane never blocks: no ``wait`` argument means no confirmation wait."""
+    client = EventClient("127.0.0.1", 1, connect=False)
+    info = _FakeInfo(rc=_success_rc(client), published=False)
+    client._paho = MagicMock()
+    client._paho.publish.return_value = info
+
+    result = client.publish("reachy/events/head/moved", "{}")
+
+    assert result.ok is True
+    assert result.reason == "ok"
+    assert info.waited_for is None, "the default path must not wait for a confirmation"
+    client.close()
+
+
+def test_publish_with_wait_confirms_delivery() -> None:
+    client = EventClient("127.0.0.1", 1, connect=False)
+    info = _FakeInfo(rc=_success_rc(client), published=True)
+    client._paho = MagicMock()
+    client._paho.publish.return_value = info
+
+    result = client.publish("events/task/requested", "{}", qos=1, wait=2.5)
+
+    assert result.ok is True
+    assert result.reason == "ok"
+    assert info.waited_for == 2.5
+    client.close()
+
+
+def test_publish_with_wait_reports_an_unconfirmed_message() -> None:
+    """A message the broker never took is ``ok=False``, not an exception.
+
+    This is the failure a one-shot publisher must be able to see: paho accepted
+    the message, so the return code is success, but it never reached the wire
+    before the wait expired. Reporting it as ``ok=True`` would let `events emit`
+    exit 0 for an event nothing ever received.
+    """
+    client = EventClient("127.0.0.1", 1, connect=False)
+    info = _FakeInfo(rc=_success_rc(client), published=False)
+    client._paho = MagicMock()
+    client._paho.publish.return_value = info
+
+    result = client.publish("events/task/requested", "{}", qos=1, wait=0.1)
+
+    assert result.ok is False
+    assert result.reason == "unconfirmed"
+    assert result.mid == 7  # still identifies the message
+    client.close()
+
+
+def test_publish_wait_never_raises_when_paho_does() -> None:
+    """``wait_for_publish`` raises on a queue-full/failed message; the contract holds."""
+    client = EventClient("127.0.0.1", 1, connect=False)
+    info = _FakeInfo(rc=_success_rc(client), published=False)
+    info.wait_for_publish = MagicMock(side_effect=RuntimeError("Message publish failed"))
+    client._paho = MagicMock()
+    client._paho.publish.return_value = info
+
+    result = client.publish("events/task/requested", "{}", qos=1, wait=0.1)
+
+    assert result.ok is False
+    assert result.reason == "unconfirmed"
+    client.close()
+
+
+def test_publish_event_passes_wait_through() -> None:
+    client = EventClient("127.0.0.1", 1, connect=False)
+    info = _FakeInfo(rc=_success_rc(client), published=True)
+    client._paho = MagicMock()
+    client._paho.publish.return_value = info
+    env = Envelope.new("task.requested", "agent://builder", data={})
+
+    result = client.publish_event(env, "events/task/requested", wait=1.5)
+
+    assert result.ok is True
+    assert info.waited_for == 1.5
+    client.close()

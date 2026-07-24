@@ -10,7 +10,10 @@ Error propagation contract
 Every handler raises :class:`events_cli.cli._errors.CliError` on
 failure; ``main()`` catches it via :func:`_dispatch` and routes through
 :mod:`events_cli.cli._output`. Unknown exceptions are wrapped into a
-``CliError`` so no Python traceback leaks to stderr.
+``CliError`` so no Python traceback leaks to stderr. The one domain error
+translated by name is
+:class:`~events_cli.address.BrokerAddressError`, because it is raised below
+every verb rather than inside one — see :func:`_dispatch`.
 
 Argparse errors (unknown verb, missing arg) also route through the structured
 format — ``_CliArgumentParser`` overrides ``.error()`` and the subparsers are
@@ -25,7 +28,8 @@ import argparse
 import sys
 
 from events_cli import __version__
-from events_cli.cli._errors import EXIT_USER_ERROR, CliError
+from events_cli.address import BrokerAddressError
+from events_cli.cli._errors import EXIT_ENV_ERROR, EXIT_USER_ERROR, CliError
 from events_cli.cli._output import emit_error
 from events_cli.cli._prog import prog_name
 
@@ -65,10 +69,15 @@ def _argv_has_json(argv: list[str] | None) -> bool:
 def _build_parser() -> argparse.ArgumentParser:
     from events_cli.cli._commands import cli as _cli_group
     from events_cli.cli._commands import doctor as _doctor_cmd
+    from events_cli.cli._commands import emit as _emit_cmd
     from events_cli.cli._commands import explain as _explain_cmd
+    from events_cli.cli._commands import get as _get_cmd
     from events_cli.cli._commands import learn as _learn_cmd
+    from events_cli.cli._commands import list as _list_cmd
     from events_cli.cli._commands import overview as _overview_cmd
     from events_cli.cli._commands import stack as _stack_group
+    from events_cli.cli._commands import sub as _sub_group
+    from events_cli.cli._commands import watch as _watch_cmd
     from events_cli.cli._commands import whoami as _whoami_cmd
 
     parser = _CliArgumentParser(
@@ -100,6 +109,20 @@ def _build_parser() -> argparse.ArgumentParser:
     # splitting them per-file would scatter that. They register at the top level
     # rather than under a `stack` noun because the contract names `events up`.
     _stack_group.register(sub)
+    # Durable subscriptions: the registry+session noun (`sub`) and the bounded
+    # cursor drain (`watch`). Both are translation layers over
+    # events_cli/subs/ and events_cli/history/ — see those modules' docstrings
+    # for the domain logic and events_cli/cli/_commands/watch.py for the
+    # --since composition decision.
+    _sub_group.register(sub)
+    _watch_cmd.register(sub)
+    # The direct history-read surface: publish through the CLI (`emit`) and
+    # read captured history back (`get`/`list`). Translation layers over
+    # events_cli/core (envelope + topics), events_cli.client (emit only) and
+    # events_cli/history (get/list only) — see each module's docstring.
+    _emit_cmd.register(sub)
+    _get_cmd.register(sub)
+    _list_cmd.register(sub)
     # Register your own noun groups here:
     #   from events_cli.cli._commands import my_noun as _my_noun_group
     #   _my_noun_group.register(sub)
@@ -120,6 +143,17 @@ def _dispatch(args: argparse.Namespace) -> int:
     except CliError as err:
         emit_error(err, json_mode=json_mode)
         return err.code
+    except BrokerAddressError as err:
+        # A malformed EVENTS_BROKER_HOST/PORT is discovered wherever a default
+        # address is first constructed — inside EventClient for `emit`, inside
+        # BrokerAddress for `sub`/`watch` — which is too deep for any one verb
+        # to own. It is an environment fault (exit 2) with a hint the resolver
+        # already wrote, so it is translated here rather than degraded into the
+        # "unexpected: ... file a bug" wrapper below, which would be exit 1 and
+        # would blame the wrong thing.
+        wrapped = CliError(code=EXIT_ENV_ERROR, message=str(err), remediation=err.remediation)
+        emit_error(wrapped, json_mode=json_mode)
+        return wrapped.code
     except Exception as err:  # noqa: BLE001 - last-resort; wrap and route cleanly
         wrapped = CliError(
             code=EXIT_USER_ERROR,

@@ -18,7 +18,9 @@ own section below because discovering them in production is expensive:
 2. [Delivery is at-least-once, so consumers must dedupe](#delivery-is-at-least-once-so-consumers-must-dedupe)
    on the envelope `id`. This is a requirement, not an optimisation.
 3. [Retained messages are the last value, not history](#retained-messages-are-the-last-value-not-history).
-   Replay is a different mechanism that does not exist yet.
+   Replay is a different mechanism — durable subscriptions and the bounded
+   cursor drain (`events sub` / `events watch`) — not a property of a
+   retained message.
 
 ## What is built, and what is not
 
@@ -29,19 +31,23 @@ decided design constraint with an issue, not a shipped behaviour.
 | Lane | Status |
 |------|--------|
 | Envelope core — CloudEvents-shaped, immutable, pure and dockerless | built (first slice) |
+| Canonical topic mapping — dotted `type` ⇄ MQTT topic (`events_cli/core/topics.py`) | built (second wave) |
 | Importable publish client — `import events_cli` | built (first slice) |
 | Raw MQTT port — TCP 1883 on loopback | supported surface (first slice) |
 | Stack verbs — `events init` / `up` / `status` / `logs` / `down` | built (first slice) |
 | agentfront-derived MCP and HTTP surfaces | not built — [#6](https://github.com/agentculture/events-cli/issues/6) |
-| Durable subscriptions, cursor drain, history and replay | not built — [#7](https://github.com/agentculture/events-cli/issues/7) |
+| Durable subscriptions + cursor drain — registry, MQTT persistent sessions, history store, `events sub add/list/show/remove`, `events watch` | built (second wave) |
+| Event history reads — `events emit` / `get` / `list` | built (second wave) |
 | Pipelines — apply / list / show / run / inspect | not built — [#8](https://github.com/agentculture/events-cli/issues/8) |
 | `events up` routed through `shell-cli` confinement | not built — [#9](https://github.com/agentculture/events-cli/issues/9) |
 | dynsec identities, topic ACLs, documented remote opt-in | not built — [#10](https://github.com/agentculture/events-cli/issues/10) |
 
-There are no `events emit`, `events watch` or `events pipeline` verbs in the
-first slice. Publishing in this slice happens through the importable client or
-straight over MQTT; #1's pipeline acceptance criteria are explicitly **not** met
-by it.
+`events emit`, `events get` and `events list` shipped alongside `events sub`
+and `events watch` in the second wave: `emit` validates an envelope through
+the core and publishes it QoS 1 to its canonical topic, and `get`/`list` read
+back whatever a registered subscription's drain actually captured. There is
+still no `events pipeline` verb, and #1's pipeline acceptance criteria remain
+explicitly **not** met.
 
 ## Lane boundary: culture carries conversation, events-cli carries events
 
@@ -195,11 +201,199 @@ any producer of retained state should carry an equivalent, because without one
 "retained" quietly means "stale forever".
 
 Durable history — replay from a cursor, surviving a stack restart — is a
-different mechanism living in the control service's own store, and it is
-deliberately designed together with durable subscriptions rather than bolted on
-afterwards ([#7](https://github.com/agentculture/events-cli/issues/7)). It does
-not exist yet. Nothing in this repo should be read as implying retained ==
-history.
+different mechanism living in the control service's own store, deliberately
+built together with durable subscriptions rather than bolted on afterwards.
+The store, the registry and the bounded drain are built, `events sub` /
+`events watch` are the CLI surface over them (see
+[below](#the-consume-side-cursor-drain-single-drainer-and-the-capture-boundary)),
+and `events get` / `events list` now read captured history directly. Nothing
+in this repo should be read as implying retained == history.
+
+## The canonical topic mapping
+
+Every contract-lane topic is derived mechanically from an event's dotted
+`type`, never invented by hand: `events_cli/core/topics.py` is the one place
+that mapping is defined, and every other layer — the importable client, the
+subscription registry, the drain engine, the CLI verbs — is required to go
+through it rather than construct topic strings itself. A dot in a dotted
+`type` becomes an MQTT topic level, and the literal segment `events` is
+prepended to everything the module produces:
+
+| Dotted type / pattern | MQTT topic / filter |
+|------------------------|----------------------|
+| `task.requested` | `events/task/requested` |
+| `heartbeat` | `events/heartbeat` |
+| `task.*` (pattern) | `events/task/+` (filter) |
+
+Two rules keep the mapping unambiguous:
+
+- **`*` matches exactly one dotted segment**, and always compiles to MQTT's
+  single-level wildcard `+` — **never** the multi-level `#`. `task.*` selects
+  `task.requested` and `task.completed` but not a grandchild such as
+  `task.sub.completed`; compiling it to `#` would let a pattern's reach widen
+  silently every time a producer added a deeper segment.
+- **A pattern must never contain a raw MQTT filter character** — `#`, `+`, or
+  the level separator `/` itself. Those carry MQTT structural meaning a
+  hand-typed dotted pattern must never smuggle in; most importantly, they are
+  exactly what would let a pattern escape the `events/` prefix. Rejecting them
+  outright, rather than passing them through, is a confirmed finding from this
+  arc's challenge pass, not a defensive guess.
+
+The `events/` prefix is what separates this contract lane from a
+[producer-owned topic tree](#the-raw-mqtt-port-is-first-class) such as
+`reachy-mini-cli`'s `reachy/events/{source}/{type}` and retained
+`reachy/state/{key}`. No dotted event type can spell its way out of the
+prefix — an event literally typed `reachy.state.updated` still maps to
+`events/reachy/state/updated`, never to `reachy/state/updated` — and no
+contract-lane filter can reach into a producer's own tree either.
+
+## The backlog bound: queued messages for an offline session
+
+A persistent MQTT session's queue for a subscriber that is currently offline
+is not unbounded, and the bound is not something `events-cli` invents — it is
+mosquitto's own `max_queued_messages` setting, which the generated
+`mosquitto.conf` now states explicitly, next to the `persistence` block, so it
+is a documented number rather than an inherited default.
+
+**Measured, not assumed.** On 2026-07-24 a scratch `eclipse-mosquitto:2.1.2-alpine`
+broker was run with this repo's exact template config and probed directly:
+
+- An MQTT5 persistent session (`clean_start=False`, CONNECT
+  `SessionExpiryInterval=0xFFFFFFFF`) reported `session_present=True` after a
+  **broker restart**, with no extra broker configuration — subscription
+  registration and queued backlog both survive.
+- **1200** QoS-1 messages were published while the subscriber was offline. On
+  resume, exactly **1000** arrived, **in order**, and they were the
+  **OLDEST** ones (`m00000` … `m00999`). The 200 newest were **dropped**.
+
+That makes mosquitto 2.1.2's overflow behaviour concrete: once the queue is
+full, the broker **keeps the backlog it already has and refuses new
+arrivals** — it does not evict the head to make room for the tail. A session
+that overflows loses its most recent events, not its oldest ones.
+
+**The only in-band signal is a broker log line** —
+`Outgoing messages are being dropped for client <id>.` — reachable via
+`events logs`; there is no `$SYS` topic and no distinct disconnect reason for
+it. A design that must detect overflow has to watch that log line, or,
+better, drain often enough that reaching the bound stays unrealistic — see
+cursor-drain semantics below.
+
+## The consume side: cursor drain, single-drainer, and the capture boundary
+
+The subscription registry, the MQTT persistent-session lifecycle, the history
+store and the bounded drain engine are **built** (`events_cli/subs/`,
+`events_cli/history/`), and the CLI surface over them — `events sub
+add/list/show/remove`, `events watch`, and the direct history-read surface
+`events emit` / `events get` / `events list` — all shipped in the second wave.
+`events emit <type> --data <file|->` validates an envelope through the core
+(generating `id`/`time`), publishes it QoS 1 to its canonical topic via
+`EventClient`, and prints the resulting `PublishResult`; `events get
+<event-id>` and `events list --type <t> --max N` read back whatever a
+registered subscription's drain actually captured. Everything below is the
+confirmed contract this arc satisfies, not a proposal.
+
+**Cursor-drain semantics.** A long-lived MQTT subscription blocks a request in
+every request/response surface — an MCP tool call, an HTTP request — and the
+CLI is the only surface that can stream forever, so the consume verb cannot be
+an endless `watch` everywhere. The shape that works identically on every
+surface is a **bounded drain over a durable, server-side, named
+subscription**: `events watch <sub> --since <cursor> --max N --timeout S`
+replays whatever the history store already holds past `<cursor>` first — a
+pure, dockerless read, no broker connection required — then resumes the
+subscription's persistent session only for whatever budget is left, consuming
+up to `--max` events or until the `--timeout` deadline, persisting each event
+to the history store **before** acknowledging it, and returning the batch plus
+the next cursor. Every agent-facing verb in this arc carries `--max` and
+`--timeout` with **non-infinite defaults** — an unbounded default eventually
+hangs an agent turn — and there is deliberately no `--follow`; unbounded
+streaming stays an HTTP-only concern for a later arc.
+
+**Single-drainer semantics.** A named subscription is drained by **one**
+process at a time. MQTT itself enforces this: a persistent session is
+identified by its client id, and a second process connecting with the same id
+causes the broker to **take over** the session and disconnect the first — the
+2026-07-24 probe observed exactly this log line: `Client <id> [(null):0]
+disconnected: session taken over.` A concurrent second drainer is therefore
+not a silent race; it is an observable disconnect of whichever drainer was
+already connected. Persisting each event to the history store **before**
+acknowledging it — the same ordering the backlog-bound section above assumes —
+is what makes a takeover **lossless** rather than merely loud: the outgoing
+drainer may have delivered a batch it never got to acknowledge, but nothing it
+already persisted is lost, and the incoming drainer resumes the same session
+with the same queued backlog. Consumer-side dedupe on the envelope `id` —
+already a contract requirement,
+[above](#delivery-is-at-least-once-so-consumers-must-dedupe) — is what makes a
+takeover safe to retry rather than merely lossless.
+
+**The capture boundary.** History captures only what a **registered
+subscription's persistent session actually queued** — nothing more. Three
+concrete consequences:
+
+- An event published **before** a subscription is registered is transported by
+  the broker to whichever other subscriber wants it, but was never queued for
+  this one, so a later drain of that subscription will never return it. There
+  is no retroactive capture.
+- An event published at **QoS 0** is never queued for an offline session at
+  all — MQTT's own delivery model, not an `events-cli` choice — so it is never
+  captured regardless of whether a subscription exists. See the QoS trap
+  below.
+- There is **no global capture** of contract-lane traffic — only what a
+  registered subscription's session actually queued is ever captured; nothing
+  published to `events/…` is captured for a topic nobody has subscribed to
+  yet. `events list` reads only what registered subscriptions actually
+  drained — a view over what was captured, never a claim that every event
+  ever published is in it. Consumers must not read it as a complete log.
+
+## A payload that is not an envelope is dropped, permanently
+
+If a message arrives on a contract-lane topic and does not parse as a valid
+envelope, the drain **acknowledges it and discards it**. It is counted, its
+topic and a truncated reason are reported in the drain result's `skipped` list,
+and a warning is logged — but **the bytes are gone**. There is no dead-letter
+queue, and no way to recover the payload afterwards.
+
+This is deliberate, and the alternative is worse. Leaving it unacknowledged
+would make it a poison pill: MQTT redelivers an unacknowledged QoS 1 message
+forever, so it would consume part of *every* later drain's `--max` for as long
+as the subscription lives, and at the broker's inflight limit it would
+eventually block every message queued behind it. One bad publish would take the
+subscription down.
+
+**What this means if you publish to the contract lane:** validate before you
+publish. `events emit` does this for you — it rejects an invalid envelope with
+field-level errors and publishes nothing. If you publish directly with
+`EventClient`, build your envelope through `events_cli.core.Envelope` rather
+than hand-writing JSON, and treat a `skipped` entry appearing in a consumer's
+drain as a producer bug to fix at the source.
+
+The asymmetry is worth knowing, because it is the opposite decision to the one
+made for store failures: a bad payload is acknowledged because the fault is in
+the *message* and will never parse, whereas a failure to write to the history
+store leaves the message **unacknowledged** so the broker redelivers it — that
+fault is in the *store*, and it heals when an operator fixes it.
+
+## The QoS trap: `publish()` still defaults to QoS 0 — `publish_event()` no longer does
+
+`EventClient.publish()` — the raw lane `reachy-mini-cli`'s 50 Hz control loop
+binds to — still defaults to `qos=0`, correct for the co-located,
+drop-don't-block lane [described above](#the-raw-mqtt-port-is-first-class),
+where a real-time loop would rather lose a message than block on an
+acknowledgement. **`publish_event()` no longer shares that default**: since
+`0.10.0` it defaults to `qos=1` — a deliberate behaviour change on an
+already-published wheel (see `CHANGELOG.md`) — because an envelope published
+at QoS 0 is never queued for an offline persistent session at all, exactly the
+trap this section is named for, and `publish_event()` is the
+envelope-publishing call, not the raw one. `events emit` also passes `qos=1`
+explicitly, so a CLI-emitted event is always eligible for durable capture
+regardless of the client's own default.
+
+That default has a consequence a consumer must not miss whichever call they
+use: **QoS 0 messages are never queued for an offline session**, at all,
+regardless of whether a subscription exists for them. A publish at QoS 0 is
+transported to whoever is listening *right now* and nowhere else — it bypasses
+durable capture entirely, by construction, not by a bug. A caller that needs a
+published event to survive being captured by a drain must publish it at QoS
+1 — `publish_event()`'s new default, and always what `events emit` does.
 
 ## Network posture
 
@@ -228,6 +422,31 @@ lane as an opt-in, not as a debugging leftover.
 One portability note for clients: prefer an explicit `127.0.0.1` over
 `localhost`. On a dual-stack host `localhost` can resolve v6-first, which would
 silently miss a v4-only published port.
+
+### Addressing a different broker
+
+`127.0.0.1:1883` is the *default*, not a hard-coded destination.
+`EVENTS_BROKER_HOST` / `EVENTS_BROKER_PORT` replace it for every lane that
+resolves a default address — `events sub add/remove`, `events watch`,
+`events emit`, and a default-constructed `EventClient()` in the import lane.
+Unset means the literal default, so nothing changes for a caller that never sets
+them, and an explicitly passed address (`EventClient("10.0.0.5", 1884)`,
+`BrokerAddress(...)`) is never overridden by the environment.
+
+This is deliberately an environment variable and not a CLI flag: one broker per
+host is the deployment model, so the address is a property of the host a process
+is talking to rather than a per-invocation choice, and a flag would have to be
+threaded through every verb that reaches a broker. Remote access as a
+*supported, documented surface* — with credentials and topic ACLs — remains
+[#10](https://github.com/agentculture/events-cli/issues/10)'s and will revisit
+the surface properly. The override does not widen the broker's network posture
+by itself: nothing about it changes what Compose publishes.
+
+A malformed `EVENTS_BROKER_PORT` is a hard failure (exit 2 at the CLI,
+`BrokerAddressError` in the import lane), never a fallback to 1883. Falling back
+would let a typo silently redirect traffic onto whatever already holds the
+default port — the accident the override exists to prevent, and precisely how
+the docker-backed integration suite keeps off the real stack's port.
 
 ## Who depends on this: the blocked-consumer chain
 

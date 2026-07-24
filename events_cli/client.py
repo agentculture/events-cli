@@ -22,6 +22,15 @@ Never raises into the caller
     at construction (nonsensical config) and :class:`MqttDependencyError` when
     paho itself is missing.
 
+Where it connects
+    ``EventClient()`` with no host/port resolves the default address through
+    :mod:`events_cli.address` — ``127.0.0.1:1883`` (what ``events up``
+    publishes) unless ``EVENTS_BROKER_HOST`` / ``EVENTS_BROKER_PORT`` say
+    otherwise. An explicit host/port is never overridden. That single resolver
+    is shared with :class:`events_cli.subs.session.BrokerAddress`, so the
+    producer lane and the durable-subscription lane cannot disagree about
+    where "the broker" is.
+
 Lazy import boundary
     paho is imported **only** inside this module, and only when the client is
     actually constructed (:func:`_load_paho`). It is never imported from
@@ -43,6 +52,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
+from events_cli.address import default_broker_host, default_broker_port
 from events_cli.core.envelope import Envelope
 from events_cli.core.errors import EventsError
 
@@ -62,8 +72,6 @@ _LOG = logging.getLogger("events_cli.client")
 #: The distribution that carries the transport client, named in the error below.
 _PAHO_DISTRIBUTION = "paho-mqtt"
 
-_DEFAULT_HOST = "127.0.0.1"
-_DEFAULT_PORT = 1883
 _DEFAULT_KEEPALIVE = 60
 
 
@@ -181,6 +189,34 @@ def _rc_reason(rc: Any) -> str:
     return str(rc)
 
 
+def _validate_client_config(
+    host: str,
+    port: int,
+    keepalive: int,
+    will: Will | None,
+    availability_topic: str | None,
+) -> None:
+    """Reject nonsensical constructor config before any paho object exists.
+
+    Split out of :meth:`EventClient.__init__` so the constructor's cognitive
+    complexity stays low — this is pure validation, called exactly once, with
+    the same checks and messages that used to live inline. Runtime broker
+    state never reaches this function; it only catches genuine programmer
+    error at construction time.
+    """
+    if not isinstance(host, str) or not host:
+        raise ValueError("host must be a non-empty string")
+    if isinstance(port, bool) or not isinstance(port, int) or not 0 < port < 65536:
+        raise ValueError("port must be an integer in 1..65535")
+    if isinstance(keepalive, bool) or not isinstance(keepalive, int) or keepalive <= 0:
+        raise ValueError("keepalive must be a positive integer (seconds)")
+    if will is not None and availability_topic is not None:
+        raise ValueError(
+            "pass either 'will' or 'availability_topic', not both — "
+            "availability_topic builds its own Last Will"
+        )
+
+
 class EventClient:
     """An importable, thread-safe MQTT publish client that never raises at runtime.
 
@@ -199,8 +235,8 @@ class EventClient:
 
     def __init__(
         self,
-        host: str = _DEFAULT_HOST,
-        port: int = _DEFAULT_PORT,
+        host: str | None = None,
+        port: int | None = None,
         *,
         client_id: str | None = None,
         keepalive: int = _DEFAULT_KEEPALIVE,
@@ -213,19 +249,20 @@ class EventClient:
         password: str | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
+        # `None` means "wherever the broker is by default" — the literal
+        # 127.0.0.1:1883 `events up` publishes, unless EVENTS_BROKER_HOST /
+        # EVENTS_BROKER_PORT say otherwise (events_cli/address.py). Resolved
+        # here rather than as a signature default so the environment is read at
+        # construction, not at import: a process that sets the variable and then
+        # builds a client must not depend on import order. An explicit host/port
+        # still wins outright, and a malformed EVENTS_BROKER_PORT raises
+        # BrokerAddressError rather than silently falling back to 1883.
+        host = default_broker_host() if host is None else host
+        port = default_broker_port() if port is None else port
+
         # -- config validation: genuine programmer error raises here, before any
         #    paho object exists. Runtime broker state never reaches this branch.
-        if not isinstance(host, str) or not host:
-            raise ValueError("host must be a non-empty string")
-        if isinstance(port, bool) or not isinstance(port, int) or not 0 < port < 65536:
-            raise ValueError("port must be an integer in 1..65535")
-        if isinstance(keepalive, bool) or not isinstance(keepalive, int) or keepalive <= 0:
-            raise ValueError("keepalive must be a positive integer (seconds)")
-        if will is not None and availability_topic is not None:
-            raise ValueError(
-                "pass either 'will' or 'availability_topic', not both — "
-                "availability_topic builds its own Last Will"
-            )
+        _validate_client_config(host, port, keepalive, will, availability_topic)
 
         self._host = host
         self._port = port
@@ -323,6 +360,7 @@ class EventClient:
         *,
         qos: int = 0,
         retain: bool = False,
+        wait: float = 0.0,
     ) -> PublishResult:
         """Enqueue a message for delivery. O(1) on the caller's thread; never raises.
 
@@ -334,7 +372,25 @@ class EventClient:
         ``payload`` may be an :class:`Envelope` (sent as its JSON wire form), a
         mapping (sent as JSON), or raw ``str``/``bytes``. ``retain=True`` marks
         the message as the topic's last-known value; ``qos`` defaults to 0
-        (at-most-once, drop-don't-block).
+        (at-most-once, drop-don't-block) — right for this raw, co-located lane,
+        and deliberately unchanged (see :meth:`publish_event` for the lane
+        whose default changed). **A QoS 0 publish is never queued for an
+        offline persistent session at all**, regardless of whether a
+        subscription exists for the topic — it bypasses durable capture
+        (:mod:`events_cli.history`) entirely, by construction. Pass ``qos=1``
+        whenever a published message must survive being captured by a drain.
+
+        ``wait`` is **0 by default and must stay 0 for the hot lane**: a positive
+        value blocks the calling thread until the broker confirms the message (or
+        the bound expires), which is precisely what a 50 Hz control loop must
+        never do. It exists for *one-shot* callers. paho is explicit that
+        stopping the loop is not a flush — ``loop_stop``'s own docstring says
+        "This don't guarantee that publish packet are sent, use
+        ``wait_for_publish`` or ``on_publish`` to ensure publish are sent" — so a
+        process that publishes and immediately exits can report success for a
+        message the broker never saw. A wait that expires comes back as
+        ``ok=False`` with reason ``"unconfirmed"``; it is never an exception, and
+        the never-raise contract is unchanged.
         """
         connected = self.is_connected
         try:
@@ -344,23 +400,65 @@ class EventClient:
             return PublishResult(ok=False, connected=connected, reason=_reason_text(exc))
         rc = getattr(info, "rc", None)
         ok = rc == self._mqtt.MQTTErrorCode.MQTT_ERR_SUCCESS
+        reason = "ok" if ok else _rc_reason(rc)
+        if ok and wait > 0 and not self._confirm(info, wait):
+            ok, reason = False, "unconfirmed"
         return PublishResult(
             ok=ok,
             connected=connected,
-            reason="ok" if ok else _rc_reason(rc),
+            reason=reason,
             mid=getattr(info, "mid", None),
         )
 
+    def _confirm(self, info: Any, timeout: float) -> bool:
+        """True once the broker has taken the message. Bounded, and never raises.
+
+        Only reached when a caller explicitly passed ``wait`` — the default path
+        never touches it, so the O(1)-enqueue guarantee is untouched.
+        ``wait_for_publish`` returns silently on expiry, so the answer comes from
+        ``is_published()`` afterwards rather than from the absence of an
+        exception.
+        """
+        try:
+            info.wait_for_publish(timeout)
+            return bool(info.is_published())
+        except Exception as exc:  # noqa: BLE001 - never-raise contract
+            self._log.warning("waiting for publish confirmation failed: %s", exc)
+            return False
+
     def publish_event(
-        self, envelope: Envelope, topic: str, *, qos: int = 0, retain: bool = False
+        self,
+        envelope: Envelope,
+        topic: str,
+        *,
+        qos: int = 1,
+        retain: bool = False,
+        wait: float = 0.0,
     ) -> PublishResult:
         """Publish an :class:`Envelope` as its canonical JSON wire form. Never raises.
 
         A typed convenience over :meth:`publish` that makes the topic explicit;
         the consumer owns its topic tree (e.g. ``reachy/events/{source}/{type}``)
         rather than having the client invent one.
+
+        ``qos`` defaults to **1**, not 0 — a behaviour change from before
+        0.10.0 (see ``CHANGELOG.md``). A QoS 0 publish is never queued for an
+        offline persistent session at all, so it silently bypasses durable
+        capture (:mod:`events_cli.history`, the store ``events watch`` drains
+        into) regardless of whether a subscription exists — the exact trap
+        this default now closes for the envelope-publishing lane. ``events
+        emit`` (``events_cli/cli/_commands/emit.py``) always passes ``qos=1``
+        explicitly rather than relying on this default, and it is the only
+        thing changing here: :meth:`publish` — the raw lane
+        ``reachy-mini-cli``'s 50 Hz control loop binds to — still defaults to
+        ``qos=0`` and is deliberately unaffected. Pass ``qos=0`` explicitly if
+        an envelope publish genuinely does not need durable capture.
+
+        ``wait`` passes straight through to :meth:`publish` and is 0 —
+        non-blocking — by default. See there for why a one-shot caller such as
+        ``events emit`` needs it and a control loop must never use it.
         """
-        return self.publish(topic, envelope, qos=qos, retain=retain)
+        return self.publish(topic, envelope, qos=qos, retain=retain, wait=wait)
 
     # -- observable state --------------------------------------------------
 
