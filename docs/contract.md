@@ -18,7 +18,9 @@ own section below because discovering them in production is expensive:
 2. [Delivery is at-least-once, so consumers must dedupe](#delivery-is-at-least-once-so-consumers-must-dedupe)
    on the envelope `id`. This is a requirement, not an optimisation.
 3. [Retained messages are the last value, not history](#retained-messages-are-the-last-value-not-history).
-   Replay is a different mechanism that does not exist yet.
+   Replay is a different mechanism — durable subscriptions and the bounded
+   cursor drain (`events sub` / `events watch`) — not a property of a
+   retained message.
 
 ## What is built, and what is not
 
@@ -34,15 +36,16 @@ decided design constraint with an issue, not a shipped behaviour.
 | Raw MQTT port — TCP 1883 on loopback | supported surface (first slice) |
 | Stack verbs — `events init` / `up` / `status` / `logs` / `down` | built (first slice) |
 | agentfront-derived MCP and HTTP surfaces | not built — [#6](https://github.com/agentculture/events-cli/issues/6) |
-| Durable subscriptions, cursor drain, history and replay | not built — [#7](https://github.com/agentculture/events-cli/issues/7) |
+| Durable subscriptions + cursor drain — registry, MQTT persistent sessions, history store, `events sub add/list/show/remove`, `events watch` | built (second wave) |
+| Event history reads — `events emit` / `get` / `list` | not built — [#7](https://github.com/agentculture/events-cli/issues/7) |
 | Pipelines — apply / list / show / run / inspect | not built — [#8](https://github.com/agentculture/events-cli/issues/8) |
 | `events up` routed through `shell-cli` confinement | not built — [#9](https://github.com/agentculture/events-cli/issues/9) |
 | dynsec identities, topic ACLs, documented remote opt-in | not built — [#10](https://github.com/agentculture/events-cli/issues/10) |
 
-There are no `events emit`, `events watch` or `events pipeline` verbs in the
-first slice. Publishing in this slice happens through the importable client or
-straight over MQTT; #1's pipeline acceptance criteria are explicitly **not** met
-by it.
+There is no `events emit` or `events pipeline` verb yet. `events sub` and
+`events watch` shipped in the second wave; publishing still happens through
+the importable client or straight over MQTT, and #1's pipeline acceptance
+criteria remain explicitly **not** met.
 
 ## Lane boundary: culture carries conversation, events-cli carries events
 
@@ -196,11 +199,14 @@ any producer of retained state should carry an equivalent, because without one
 "retained" quietly means "stale forever".
 
 Durable history — replay from a cursor, surviving a stack restart — is a
-different mechanism living in the control service's own store, and it is
-deliberately designed together with durable subscriptions rather than bolted on
-afterwards ([#7](https://github.com/agentculture/events-cli/issues/7)). It does
-not exist yet. Nothing in this repo should be read as implying retained ==
-history.
+different mechanism living in the control service's own store, deliberately
+built together with durable subscriptions rather than bolted on afterwards.
+The store, the registry and the bounded drain are built, and `events sub` /
+`events watch` are the CLI surface over them (see
+[below](#the-consume-side-cursor-drain-single-drainer-and-the-capture-boundary));
+reading captured history directly (`events get` / `events list`) is not built
+yet — [#7](https://github.com/agentculture/events-cli/issues/7). Nothing in
+this repo should be read as implying retained == history.
 
 ## The canonical topic mapping
 
@@ -271,51 +277,53 @@ it. A design that must detect overflow has to watch that log line, or,
 better, drain often enough that reaching the bound stays unrealistic — see
 cursor-drain semantics below.
 
-## The designed consume side: cursor drain, single-drainer, and the capture boundary
+## The consume side: cursor drain, single-drainer, and the capture boundary
 
-Everything in this section is **designed, not built**. There is no
-subscription registry, no history store, and no `events sub`, `events watch`,
-`events emit`, `events get` or `events list` verb in this repo today — see the
-[status table](#what-is-built-and-what-is-not) above, unchanged by this
-section. What follows is the confirmed contract those verbs must satisfy when
-[#7](https://github.com/agentculture/events-cli/issues/7) lands, written down
-now so the shape is decided before the code exists, not discovered while
-writing it.
+The subscription registry, the MQTT persistent-session lifecycle, the history
+store and the bounded drain engine are **built** (`events_cli/subs/`,
+`events_cli/history/`), and the CLI surface over them —
+`events sub add/list/show/remove` and `events watch` — shipped in the second
+wave alongside this document's update. What is **not** built yet is the direct
+history-read surface: `events emit` (a CLI-side publish verb), `events get` and
+`events list` remain [#7](https://github.com/agentculture/events-cli/issues/7).
+Everything below is the confirmed contract this arc satisfies, not a proposal.
 
 **Cursor-drain semantics.** A long-lived MQTT subscription blocks a request in
 every request/response surface — an MCP tool call, an HTTP request — and the
 CLI is the only surface that can stream forever, so the consume verb cannot be
-an endless `watch` everywhere. The shape designed to work identically on every
+an endless `watch` everywhere. The shape that works identically on every
 surface is a **bounded drain over a durable, server-side, named
-subscription**: `events watch <sub> --since <cursor> --max N --timeout S` is
-designed to resume the subscription's persistent session, consume up to
-`--max` events or until the `--timeout` deadline, persist each event to the
-history store **before** acknowledging it, and return the batch plus the next
-cursor. Every agent-facing verb in this arc is designed to carry `--max` and
+subscription**: `events watch <sub> --since <cursor> --max N --timeout S`
+replays whatever the history store already holds past `<cursor>` first — a
+pure, dockerless read, no broker connection required — then resumes the
+subscription's persistent session only for whatever budget is left, consuming
+up to `--max` events or until the `--timeout` deadline, persisting each event
+to the history store **before** acknowledging it, and returning the batch plus
+the next cursor. Every agent-facing verb in this arc carries `--max` and
 `--timeout` with **non-infinite defaults** — an unbounded default eventually
 hangs an agent turn — and there is deliberately no `--follow`; unbounded
 streaming stays an HTTP-only concern for a later arc.
 
-**Single-drainer semantics.** A named subscription is designed to be drained
-by **one** process at a time. MQTT itself enforces this: a persistent session
-is identified by its client id, and a second process connecting with the same
-id causes the broker to **take over** the session and disconnect the first —
-the 2026-07-24 probe observed exactly this log line: `Client <id> [(null):0]
+**Single-drainer semantics.** A named subscription is drained by **one**
+process at a time. MQTT itself enforces this: a persistent session is
+identified by its client id, and a second process connecting with the same id
+causes the broker to **take over** the session and disconnect the first — the
+2026-07-24 probe observed exactly this log line: `Client <id> [(null):0]
 disconnected: session taken over.` A concurrent second drainer is therefore
 not a silent race; it is an observable disconnect of whichever drainer was
 already connected. Persisting each event to the history store **before**
 acknowledging it — the same ordering the backlog-bound section above assumes —
-is what is designed to make a takeover **lossless** rather than merely loud:
-the outgoing drainer may have delivered a batch it never got to acknowledge,
-but nothing it already persisted is lost, and the incoming drainer resumes the
-same session with the same queued backlog. Consumer-side dedupe on the
-envelope `id` — already a contract requirement,
+is what makes a takeover **lossless** rather than merely loud: the outgoing
+drainer may have delivered a batch it never got to acknowledge, but nothing it
+already persisted is lost, and the incoming drainer resumes the same session
+with the same queued backlog. Consumer-side dedupe on the envelope `id` —
+already a contract requirement,
 [above](#delivery-is-at-least-once-so-consumers-must-dedupe) — is what makes a
 takeover safe to retry rather than merely lossless.
 
-**The capture boundary.** History is designed to capture only what a
-**registered subscription's persistent session actually queued** — nothing
-more. Three concrete consequences:
+**The capture boundary.** History captures only what a **registered
+subscription's persistent session actually queued** — nothing more. Three
+concrete consequences:
 
 - An event published **before** a subscription is registered is transported by
   the broker to whichever other subscriber wants it, but was never queued for
@@ -325,12 +333,13 @@ more. Three concrete consequences:
   all — MQTT's own delivery model, not an `events-cli` choice — so it is never
   captured regardless of whether a subscription exists. See the QoS trap
   below.
-- There is **no global capture** of contract-lane traffic until a control
-  service exists to run one; today, and until #7 lands, nothing published to
-  `events/…` is captured at all. Once built, `events list` is designed to read
-  only what registered subscriptions actually drained — a view over what was
-  captured, never a claim that every event ever published is in it. Consumers
-  must not read it as a complete log.
+- There is **no global capture** of contract-lane traffic — only what a
+  registered subscription's session actually queued is ever captured; nothing
+  published to `events/…` is captured for a topic nobody has subscribed to
+  yet. Once `events list` ships ([#7](https://github.com/agentculture/events-cli/issues/7)),
+  it is designed to read only what registered subscriptions actually drained —
+  a view over what was captured, never a claim that every event ever published
+  is in it. Consumers must not read it as a complete log.
 
 ## The QoS trap: `publish()` defaults to QoS 0
 

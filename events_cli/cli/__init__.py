@@ -69,6 +69,8 @@ def _build_parser() -> argparse.ArgumentParser:
     from events_cli.cli._commands import learn as _learn_cmd
     from events_cli.cli._commands import overview as _overview_cmd
     from events_cli.cli._commands import stack as _stack_group
+    from events_cli.cli._commands import sub as _sub_group
+    from events_cli.cli._commands import watch as _watch_cmd
     from events_cli.cli._commands import whoami as _whoami_cmd
 
     parser = _CliArgumentParser(
@@ -100,6 +102,13 @@ def _build_parser() -> argparse.ArgumentParser:
     # splitting them per-file would scatter that. They register at the top level
     # rather than under a `stack` noun because the contract names `events up`.
     _stack_group.register(sub)
+    # Durable subscriptions: the registry+session noun (`sub`) and the bounded
+    # cursor drain (`watch`). Both are translation layers over
+    # events_cli/subs/ and events_cli/history/ — see those modules' docstrings
+    # for the domain logic and events_cli/cli/_commands/watch.py for the
+    # --since composition decision.
+    _sub_group.register(sub)
+    _watch_cmd.register(sub)
     # Register your own noun groups here:
     #   from events_cli.cli._commands import my_noun as _my_noun_group
     #   _my_noun_group.register(sub)

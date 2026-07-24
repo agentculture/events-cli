@@ -35,10 +35,12 @@ is `events_cli`.
 ## Status
 
 The **broker stack** is implemented: `init`/`up`/`status`/`logs`/`down` generate
-and operate a Dockerised Mosquitto deployment. The **event contract** on top of
-it — typed envelopes, correlation and causation, durable history, pipelines — is
-not implemented yet. The specification being built against lives in the
-repository's open issues.
+and operate a Dockerised Mosquitto deployment. **Durable subscriptions and the
+bounded cursor drain** are also implemented: `sub add/list/show/remove` and
+`watch`. Publishing an event through the CLI (`events emit`) and reading
+captured history directly (`events get` / `events list`) are not implemented
+yet, and neither are pipelines. The specification being built against lives in
+the repository's open issues.
 
 ## Verbs
 
@@ -53,12 +55,23 @@ repository's open issues.
 - `events status` — broker state and health.
 - `events logs` — the last N lines of the broker log.
 - `events down` — stop and remove the broker.
+- `events sub add/list/show/remove` — manage durable subscriptions.
+- `events watch <name>` — bounded cursor drain over a durable subscription.
 
 ## The broker
 
 One Eclipse Mosquitto container, published on `127.0.0.1:1883` and nowhere
 else. Anonymous on loopback, no websocket listener, persistence on a named
 volume. See `events explain init`.
+
+## Durable subscriptions and the consume side
+
+`events sub` registers a named subscription (an MQTT persistent session plus a
+registry record); `events watch` bounded-drains it, replaying already-persisted
+history before touching the broker for anything newer. See `events explain sub`
+and `events explain watch`. Publishing an event (`events emit`) and reading
+captured history directly (`events get` / `events list`) are not implemented
+yet.
 
 ## Exit-code policy
 
@@ -336,6 +349,174 @@ history.
 """
 
 
+_SUB = """\
+# events sub
+
+Manage durable subscriptions: a registry record (name, pattern, owner, client
+id) plus an MQTT persistent session in the broker, kept in step by
+`events_cli/subs/`. `events sub` alone lists what is registered (same as
+`events sub list`).
+
+## Verbs
+
+- `events sub add <name> <pattern>` — create the broker session, then the
+  record. `--owner NAME` overrides the default (this agent's `culture.yaml`
+  nick).
+- `events sub list` — every registered subscription.
+- `events sub show <name>` — one record.
+- `events sub remove <name>` — end the broker session, then drop the record.
+  `--force` drops the record even if the session could not be destroyed (the
+  broker is down) — the escape hatch for a broker that is gone for good, at
+  the cost of possibly leaving a live session orphaned in it.
+
+## Usage
+
+    events sub add robot 'task.*'
+    events sub list --json
+    events sub show robot
+    events sub remove robot --force
+
+## Exit codes
+
+- `0` success.
+- `1` a bad name/pattern, a name already registered, or an unknown name.
+- `2` a damaged registry record, or the broker refused/never answered
+  (`sub add` and `sub remove` touch the broker; `sub list`/`sub show` do not).
+
+## See also
+
+- `events explain watch`
+"""
+
+_SUB_ADD = """\
+# events sub add <name> <pattern>
+
+Registers a durable subscription: opens an MQTT persistent session
+(`clean_start=False`, an effectively infinite session expiry), subscribes the
+pattern at QoS 1, disconnects gracefully leaving the session live in the
+broker, and only then writes the registry record. A record naming a session
+that was never created would be a subscription that silently captures
+nothing, so the session is created first.
+
+## Usage
+
+    events sub add robot 'task.*'
+    events sub add robot 'task.*' --owner reachy-mini-cli
+    events sub add robot 'task.*' --json
+
+## Exit codes
+
+- `0` registered.
+- `1` an invalid name/pattern, or that name is already registered.
+- `2` the broker refused the session or never answered (start it with
+  `events up`).
+"""
+
+_SUB_LIST = """\
+# events sub list
+
+Lists every registered subscription, sorted by name. Read-only: no broker
+connection, registry only.
+
+## Usage
+
+    events sub list
+    events sub list --json
+"""
+
+_SUB_SHOW = """\
+# events sub show <name>
+
+Shows one subscription's record. Read-only: no broker connection, registry
+only.
+
+## Usage
+
+    events sub show robot
+    events sub show robot --json
+
+## Exit codes
+
+- `0` found.
+- `1` no subscription by that name.
+"""
+
+_SUB_REMOVE = """\
+# events sub remove <name>
+
+Destroys a subscription: connects with `clean_start=True` and a session
+expiry of 0 (which ends the broker session on disconnect), then drops the
+registry record. A broker that cannot be reached is an error, not a silent
+success — dropping the record would orphan a live queue with nothing on disk
+pointing at it — unless `--force` is given.
+
+## Usage
+
+    events sub remove robot
+    events sub remove robot --force
+    events sub remove robot --json
+
+## `--force`
+
+Drops the registry record even when the broker session could not be
+destroyed. Only the record goes; if the broker is actually still there, the
+session it describes is left running, queuing events forever with nothing in
+the registry pointing at it any more. Use it only when the broker is gone for
+good.
+
+## Exit codes
+
+- `0` removed.
+- `1` no subscription by that name.
+- `2` the broker refused or never answered, and `--force` was not given.
+"""
+
+_WATCH = """\
+# events watch <name>
+
+The bounded cursor drain over a durable subscription. Replays already-
+persisted history first (a pure store read — no broker connection), then
+drains the broker for anything newer, up to `--max` events or the `--timeout`
+deadline. Returns the batch plus the cursor to pass back as `--since` next
+time.
+
+## Usage
+
+    events watch robot
+    events watch robot --since 42
+    events watch robot --max 20 --timeout 10
+    events watch robot --json
+
+## Defaults
+
+`--max 100 --timeout 30`. Both are finite by policy, and there is deliberately
+no `--follow`: an unbounded stream would hang whatever is reading it, which
+for an agent means a hung turn. Poll `watch` again with the returned cursor
+instead.
+
+## How `--since` composes history and the broker
+
+1. `HistoryStore.read(name, since, max)` — bounded, exact, no broker
+   connection. If this alone fills `max`, the broker is never touched.
+2. Whatever budget is left is drained from the broker
+   (`drain_subscription`), floored at the cursor the read ended on, so a
+   drain can never return an event already replayed from history.
+3. The two batches concatenate, oldest first. `servedFrom` in the result
+   says which happened: `history`, `broker`, or `history+broker`.
+
+## Exit codes
+
+- `0` success (an empty batch at the deadline is still success — the
+  subscription is just idle).
+- `1` a bad name/bound, or no subscription by that name.
+- `2` the store is damaged, or the broker refused/never answered.
+
+## See also
+
+- `events explain sub`
+"""
+
+
 ENTRIES: dict[tuple[str, ...], str] = {
     (): _ROOT,
     # Both spellings are load-bearing: the rubric gate calls `explain events`,
@@ -356,4 +537,12 @@ ENTRIES: dict[tuple[str, ...], str] = {
     ("status",): _STATUS,
     ("logs",): _LOGS,
     ("down",): _DOWN,
+    # Durable subscriptions and the consume side. `sub` is a noun with
+    # sub-verbs, so it gets both its own key and one per sub-verb.
+    ("sub",): _SUB,
+    ("sub", "add"): _SUB_ADD,
+    ("sub", "list"): _SUB_LIST,
+    ("sub", "show"): _SUB_SHOW,
+    ("sub", "remove"): _SUB_REMOVE,
+    ("watch",): _WATCH,
 }
