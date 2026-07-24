@@ -194,9 +194,7 @@ class PreflightResult:
                 f"stop it with: {self.owner.stop_command} — then re-run "
                 f"'{prog} up'. Exactly one broker may own this port"
             )
-        return (
-            f"find the owner with: {self.discovery_command} — stop it, then " f"re-run '{prog} up'"
-        )
+        return f"find the owner with: {self.discovery_command} — stop it, then re-run '{prog} up'"
 
     def to_dict(self) -> dict[str, object]:
         return {

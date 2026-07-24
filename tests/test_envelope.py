@@ -362,8 +362,10 @@ def test_missing_and_invalid_fields_are_reported_together() -> None:
 
 
 def test_unknown_wire_field_is_rejected_with_a_did_you_mean_hint() -> None:
+    # `wire()` is built outside the block so only `from_dict` can raise inside it.
+    payload = wire(schema_version="1")
     with pytest.raises(EnvelopeValidationError) as exc:
-        Envelope.from_dict(wire(schema_version="1"))
+        Envelope.from_dict(payload)
     (err,) = [e for e in exc.value.errors if e.field == "schema_version"]
     assert err.code == "unknown_field"
     assert "schemaVersion" in err.message
@@ -590,8 +592,9 @@ def test_deep_but_reasonable_payloads_are_accepted() -> None:
 
 
 def test_validation_error_reports_fields_message_and_json_shape() -> None:
+    payload = wire(id="", type="")
     with pytest.raises(EnvelopeValidationError) as exc:
-        Envelope.from_dict(wire(id="", type=""))
+        Envelope.from_dict(payload)
     err = exc.value
     assert err.fields == ("id", "type")
     assert "id" in str(err) and "type" in str(err)
@@ -666,7 +669,12 @@ def test_new_id_applies_any_prefix() -> None:
     run = new_id("run_")
     assert run.startswith("run_")
     assert len(run) == len("run_") + 26
-    assert new_id("") != new_id("")
+    # Two separate calls must not collide. Bound to names rather than written as
+    # `new_id("") != new_id("")`: the two expressions are textually identical, so
+    # that form reads as a self-comparison to both a human and an analyser, even
+    # though the point is that the two *calls* differ.
+    first, second = new_id(""), new_id("")
+    assert first != second
 
 
 # --- immutability ----------------------------------------------------------
@@ -806,8 +814,9 @@ def test_non_string_payload_keys_are_reported_as_unknown_fields() -> None:
 
 
 def test_a_case_only_misspelling_still_gets_a_suggestion() -> None:
+    payload = wire(schemaversion="1")
     with pytest.raises(EnvelopeValidationError) as exc:
-        Envelope.from_dict(wire(schemaversion="1"))
+        Envelope.from_dict(payload)
     (err,) = [e for e in exc.value.errors if e.field == "schemaversion"]
     assert "schemaVersion" in err.message
 

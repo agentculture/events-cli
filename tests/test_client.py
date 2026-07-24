@@ -287,12 +287,16 @@ def test_invalid_config_raises_valueerror(override: dict) -> None:
 
 
 def test_will_and_availability_together_is_a_programmer_error() -> None:
+    # Built outside the raises block so the ValueError can only have come from
+    # EventClient — inside, a Will() that threw would pass this test for the
+    # wrong reason.
+    will = Will("a/b")
     with pytest.raises(ValueError):
         EventClient(
             "127.0.0.1",
             1,
             connect=False,
-            will=Will("a/b"),
+            will=will,
             availability_topic="reachy/state/online",
         )
 

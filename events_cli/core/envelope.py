@@ -172,8 +172,12 @@ _MAX_SOURCE_LENGTH = 512
 _MAX_SCHEMA_VERSION_LENGTH = 32
 _MAX_DATA_DEPTH = 32
 
-_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:+/=@_-]*$")
+_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:+/=@-]*$")
 _TYPE_RE = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
+# `[0-9]`, deliberately not `\d`: this validates a *wire* format, and Python's
+# `\d` matches Unicode decimal digits (Arabic-Indic, Devanagari, …) unless the
+# pattern also carries `re.ASCII`. The explicit class cannot be broadened by
+# someone later dropping a flag.
 _SCHEMA_VERSION_RE = re.compile(r"^[0-9]+(?:\.[0-9]+)*$")
 # W3C trace context: version-traceid-parentid-flags, lowercase hex.
 _TRACEPARENT_RE = re.compile(r"^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$")
