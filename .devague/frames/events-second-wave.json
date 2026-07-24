@@ -1,0 +1,491 @@
+{
+  "slug": "events-second-wave",
+  "title": "events second wave",
+  "schema_version": 3,
+  "status": "exported",
+  "created": "2026-07-24T14:42:29Z",
+  "updated": "2026-07-24T15:31:48Z",
+  "claims": [
+    {
+      "id": "c1",
+      "kind": "announcement",
+      "text": "events-cli ships its second wave: the deferred arcs land on the first slice \u2014 the agentfront MCP+HTTP binding from the core registry (#6), durable identity-owned subscriptions with history and bounded cursor drain (#7), pipelines over the event graph (#8), shell-cli-routed stack verbs (#9), and dynsec identities with a documented remote-access opt-in (#10) \u2014 with issue #3 answered and closed",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h1",
+          "text": "The wave announcement is honest only arc-by-arc: the exported spec marks #6/#8/#9/#10 as deferred with issue links and claims nothing delivered beyond the opening arc \u2014 mirroring how the first-slice spec carried its own deferred rows",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "This spec's build scope is the opening arc \u2014 #7 durable subscriptions + history + cursor drain, with the #3 reply/close and the pyproject description fix riding it (resolved q1) \u2014 #6/#8/#9/#10 land per the confirmed contracts on their issues afterward; verify each arc on its own issue, never as a wave-level judgment call"
+    },
+    {
+      "id": "c2",
+      "kind": "requirement",
+      "text": "Issue #3's two outstanding asks get an events-cli reply and the issue closes: the importable symbol is 'from events_cli import EventClient' (lazy PEP 562 re-export; events_cli.client defines it \u2014 their placeholder guess 'EventsClient' is one letter wrong and would degrade to a silent no-op), the constructor is EventClient(host='127.0.0.1', port=1883, *, client_id=..., connect=True) so connect() runs in the constructor by default, and the reTerminal bridge subscribes over raw loopback MQTT for this wave (client-side drain arrives with #7); acceptance is already recorded 10/10 in docs/acceptance/2026-07-24-issue-3-live-run.md",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h7",
+          "text": "The reply posted on #3 names EventClient, its import path, the constructor signature, connect-in-constructor, and the raw-MQTT subscribe answer for the reTerminal bridge; the issue is closed after the reply (or explicitly left open by the operator with the reason stated)",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c3",
+      "kind": "requirement",
+      "text": "Issue #9's reopen trigger has fired: shell-cli 0.13.x ships process.exec/process.shell behind a policy gate with persisted evidence records (its README Status section still claims no runner exists \u2014 stale against its own CHANGELOG), so the #9 evaluation of routing events up/down/logs/status through shell-cli is actionable now; any migration must keep StackError->CliError, exit code 2 for environment errors, and no traceback on stderr",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h8",
+          "text": "The #9 evaluation runs during this wave and its verdict \u2014 migrate or stay on subprocess, with reasons \u2014 is recorded on issue #9, not silently dropped",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c4",
+      "kind": "assumption",
+      "text": "Issue #7's store evaluation has a shipped concrete candidate: data-refinery-cli wave 2 provides 'import data_refinery.store' (Envelope, put/get/list/migrate; files backend dependency-free, mongo/neo4j behind the [store] extra), with eidetic-cli consuming it for the memory lane \u2014 the no-bespoke-store constraint is now an evaluation against real APIs, not a hypothetical",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c5",
+      "kind": "requirement",
+      "text": "Issue #7's cursor design must not assume total order on envelope ids: evt_ ids are Crockford ULIDs sortable at millisecond granularity only, with no intra-millisecond monotonicity (recorded on the events-first-slice frame) \u2014 the cursor must be store-assigned sequence, or the core must grow monotonic ids, before replay-from-cursor lands",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h9",
+          "text": "A test mints two envelope ids in the same millisecond and proves drain order equals store append order and cursor resume is exact \u2014 no ordering is ever derived from comparing ULIDs",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c6",
+      "kind": "requirement",
+      "text": "Issue #10's dynsec landing removes 'allow_anonymous true' from the generated mosquitto.conf \u2014 the template's own comment binds them ('when they land, this line goes away') \u2014 while keeping the anonymous co-located loopback path #3 depends on (REACHY_MQTT_URL=localhost:1883), and a stack-marked test must verify the dynsec plugin actually ships and initialises in eclipse-mosquitto:2.1.2-alpine (per_listener_settings is false, so auth settings are global)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h10",
+          "text": "Deferred-arc condition: when #10 lands, the regenerated template drops allow_anonymous true, a stack-marked test proves the dynsec path in eclipse-mosquitto:2.1.2-alpine, and the anonymous co-located loopback lane #3 depends on still works; until then this wave keeps anonymous loopback",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c7",
+      "kind": "assumption",
+      "text": "Issue #6's toolchain is already in place: agentfront 0.20.0 is the dev dep, agentfront.testing.assert_surfaces_agree imports cleanly, and App exposes tool/add_command/group/http_app/mcp_server/registry \u2014 the remaining work is exactly the confirmed c6/h6 contract: populate the registry from events_cli/core (never separate adapters), derive MCP behind [mcp] + HTTP, pin CLI/registry parity with our own tests, non-infinite --max/--timeout on every tool",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c8",
+      "kind": "requirement",
+      "text": "The pyproject [project] description drift is fixed in the wave's first PR: it presently claims events-cli 'fronts it through agentfront as a CLI, an HTTP API and an MCP surface' in the present tense while #6 is unbuilt \u2014 prose ahead of code, exactly what CLAUDE.md's Known-drift rule exists for; reword to today's truth (or record in Known drift until #6 lands)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h11",
+          "text": "The pyproject description on main no longer claims MCP/HTTP surfaces exist; the rewording rides the arc's first PR with its version bump",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c9",
+      "kind": "boundary",
+      "text": "The stable CLI contract survives every arc of the wave: _output.py stdout/stderr split and _errors.py exit codes stay frozen, the explain catalog keeps BOTH ('events',) and ('events-cli',) root keys, no traceback ever reaches stderr, and every new verb (watch, pipeline, dynsec-facing) goes through register(sub) plus a catalog entry with non-infinite --max/--timeout defaults \u2014 the rubric gate and pinned tests are the enforcement",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h12",
+          "text": "The rubric gate (agentfront cli doctor --strict) and the pinned contract tests \u2014 dual catalog root keys, prog resolution, stdout/stderr split, exit codes \u2014 pass unchanged on every PR of the arc; enforcement is CI, not intention",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c10",
+      "kind": "boundary",
+      "text": "docs/contract.md's 'What is built, and what is not' table is updated in the same PR as each arc that lands \u2014 it is currently honest (watch/pipeline verbs absent, dynsec listed 'not built \u2014 #10'), and keeping it honest is part of each arc's definition of done, not a trailing docs task",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h13",
+          "text": "Each landing PR touches docs/contract.md's built/not-built table in the same change that adds the surface \u2014 a PR adding a verb without the table update does not merge",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c11",
+      "kind": "non_goal",
+      "text": "Issue #1's non-goals hold across the whole wave: no reimplementing MQTT, no exactly-once guarantees, no arbitrary code execution inside the events service, no bespoke history store before the eidetic-cli/data-refinery-cli evaluation adjudicates, and producer-owned topic trees (reachy/events/{source}/{type}, retained reachy/state/{key}) stay exempt from envelope validation and pipelines",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c12",
+      "kind": "assumption",
+      "text": "The wave's dependency order is partially forced: #8 requires #7 (pipelines advance runs by consuming correlated events over durable history \u2014 #8's own scope says that arc lands first); #7's identity-owned subscriptions fire #10's recorded reopen trigger, so dynsec design rides with or immediately after #7; #6 and #9 are independent of both and of each other",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c13",
+      "kind": "audience",
+      "text": "Consumers of the contract lane who need bounded, resumable consumption: agents draining events inside a turn (the MCP/HTTP shape #6 will derive later), humans and scripts on the events CLI, and services importing events_cli \u2014 first on spark-f8a9. Producer-owned raw trees (reachy/*) keep raw MQTT and are unaffected",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h14",
+          "text": "The named consumers are real: the drain shape serves an agent turn within bounded time (proven by the --timeout tests), and reachy's raw-MQTT lane is untouched by the arc's diff",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c14",
+      "kind": "after_state",
+      "text": "events-cli has a consume side: named durable subscriptions survive broker and consumer restarts; 'events watch <sub> --since <cursor> --max N --timeout S' returns a bounded batch plus a cursor with nothing acknowledged lost; 'events emit/get/list' round-trip envelope events through the contract lane; drained history lives in a store that survives stack restarts \u2014 #1's emit-and-watch acceptance items are met for the event plane",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h15",
+          "text": "Every element of the after-state is mechanically checkable via the stack-marked suite: survive-restart, bounded drain, cursor resume, and the emit-to-watch round-trip \u2014 nothing rests on a judgment call",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c15",
+      "kind": "before_state",
+      "text": "Today the fabric is publish-only: EventClient publishes, the reTerminal bridge subscribes over raw MQTT, and there is no subscribe/drain/history surface at all \u2014 'events watch' does not exist, a contract-lane consumer that restarts loses everything published while it was away, and no store holds event history",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h16",
+          "text": "The before-state is evidence, not narrative: at the pre-arc HEAD, events_cli contains no subscribe/consume/store code and no watch/emit/get/list/sub verb exists in the parser or the explain catalog",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c16",
+      "kind": "success_signal",
+      "text": "Stack-marked proof on spark-f8a9: create a subscription, publish N envelopes while no drainer is connected, restart the broker, then drain \u2014 all N arrive in order within --timeout with a cursor; resuming from that cursor returns nothing already acknowledged; a second CLI process watches what the first emits; the default pytest selection stays dockerless throughout",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h17",
+          "text": "The success signal runs as an executable script or marked test on spark-f8a9 with observable output per item, exiting non-zero on any failure \u2014 a gate, not a demo, like scripts/acceptance-issue-3.sh",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c17",
+      "kind": "requirement",
+      "text": "Durable subscriptions are MQTT persistent sessions, not a resident control service: 'events sub add <name> <pattern>' registers a broker-side persistent session (clean_start=false, QoS 1, session expiry effectively infinite) subscribed to the pattern's topic filter, so the broker's existing persistence (persistence true + volume + autosave 60) buffers the backlog while no drainer is connected \u2014 no always-on control-service container ships in this arc (the resident service becomes #8's concern when pipelines need active run advancement); the undrained-backlog bound (max_queued_messages) is set explicitly in the generated mosquitto.conf and documented",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h2",
+          "text": "A stack-marked test proves the architecture: sub add, publish N envelopes with no drainer connected, docker restart of the broker, then drain returns all N in order \u2014 and the generated mosquitto.conf sets max_queued_messages explicitly with the bound documented in docs/contract.md",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c18",
+      "kind": "requirement",
+      "text": "'events watch <sub> --since <cursor> --max N --timeout S' drains: resume the session, consume up to --max, append to the history store, acknowledge, return the batch plus the next cursor; defaults are non-infinite (--max 100, --timeout 30) and there is no unbounded --follow in this arc",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h3",
+          "text": "A drain call returns within its --timeout with at most --max events plus a cursor; resuming from the returned cursor re-delivers nothing acknowledged; drain/cursor logic is tested pure and dockerless, the broker path behind the stack marker",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c19",
+      "kind": "requirement",
+      "text": "'events emit <type> --data <file|->' validates through the core envelope (generated id/time) and publishes QoS 1 to the canonical topic via EventClient; 'events get <event-id>' and 'events list --type <t> --max N' read drained history from the store \u2014 every verb with --json, registered via register(sub) with catalog entries",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h4",
+          "text": "Two CLI processes demonstrate the emit-to-watch round-trip on a live stack (stack-marked); get/list return drained envelopes by id and type with --json; envelope validation and store logic keep their coverage in the default dockerless selection",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c20",
+      "kind": "requirement",
+      "text": "The canonical transport mapping is defined and documented in docs/contract.md: envelope events publish to 'events/<type with dots as topic-level separators>' and a subscription pattern like 'task.*' compiles to the matching MQTT filter \u2014 topic names stay a transport detail per #1, the dotted type stays the contract, and producer-owned trees stay outside the mapping",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h5",
+          "text": "The type-to-topic and pattern-to-filter mapping is pure and tested dockerless in both directions; docs/contract.md documents it; and a test proves reachy/* topics are not captured by contract-lane subscription patterns",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c21",
+      "kind": "requirement",
+      "text": "Every subscription records an owner identity as a declared name (default resolved from culture.yaml nick, falling back to the client id) \u2014 unauthenticated on loopback in this arc, forward-compatible with #10's dynsec so identity-owned subscriptions gain real authentication without a schema change",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h6",
+          "text": "Every subscription record carries its owner; 'events sub list --json' shows it; and the record schema needs no migration when #10 lands (the dynsec identity name is the owner name)",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c22",
+      "kind": "boundary",
+      "text": "This arc delivers #7 plus the riders (the #3 reply/close and the pyproject description fix) only: no agentfront MCP/HTTP (#6), no pipelines (#8), no shell-cli migration (#9 \u2014 its evaluation verdict is recorded on the issue separately), no dynsec (#10), no SSE/websocket streaming \u2014 each deferred arc lands per its own issue contract, mirroring the first-slice precedent",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h18",
+          "text": "The arc's PRs add no agentfront-binding, pipeline, dynsec or SSE code; the deferred issues stay open with their contracts intact; the arc's diff contains no surface from #6/#8/#10",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    }
+  ],
+  "open_vagueness": [
+    {
+      "id": "v1",
+      "text": "Which store backend the sibling evaluation selects for drained history: data_refinery.store's files backend is the leading candidate (shipped, dependency-free), eidetic-cli sits on the memory lane above it, and a minimal in-repo JSONL append log is the fallback only if both are rejected with reasons recorded \u2014 the evaluation is a plan task; the spec's store requirements are behavioural (h2/h3), not backend-specific",
+      "kind": "unknown_nonblocking",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v2",
+      "text": "A CLI streaming --follow watch mode: the CLI is the one surface that may stream forever (#2), but it is not in this arc \u2014 revisit alongside the SSE lane when #6 lands",
+      "kind": "follow_up",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v3",
+      "text": "Durable subscriptions targeting producer-owned raw topic trees (e.g. reachy/#): outside the contract lane this arc; revisit only if a consumer asks for it",
+      "kind": "follow_up",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    }
+  ],
+  "scope_entries": [
+    {
+      "id": "s1",
+      "surface": "issues #6-#10 (confirmed spec contracts on each)",
+      "finding": "every deferred arc carries a confirmed contract comment recorded on the issue itself (c6/h6 for the binding, c8/h8 for durable subscriptions, reopen triggers for #9/#10) \u2014 the requirements baseline for the wave lives on the issues, not in-repo, and #8's scope explicitly sequences #7 first",
+      "seeds": [
+        "c12"
+      ]
+    },
+    {
+      "id": "s2",
+      "surface": "issue #3 comment thread + events_cli/__init__.py + events_cli/client.py",
+      "finding": "three reachy-mini-cli comments, zero events-cli replies: Ask 1 (exact importable symbol + constructor + connect story) and Ask 2 (subscribe over raw loopback MQTT this slice?) are both answerable today from code already on main \u2014 EventClient via lazy PEP 562 re-export, host/port/client_id kwargs, connect=True in the constructor; their placeholder binding guesses 'EventsClient' and would silently no-op",
+      "seeds": [
+        "c2"
+      ]
+    },
+    {
+      "id": "s3",
+      "surface": "shell-cli CHANGELOG 0.13.0/0.13.1 + shell/cli/_commands/{operation,policy}.py",
+      "finding": "the runner exists: process.exec and process.shell behind the policy gate, shell policy check/explain, shell operation show, persisted evidence records with secret redaction \u2014 shell-cli's README Status section ('no operation... has been built yet') is stale against its own changelog; #9's 'once its runner exists' condition is met",
+      "seeds": [
+        "c3"
+      ]
+    },
+    {
+      "id": "s4",
+      "surface": "data-refinery-cli README (wave table) + import data_refinery.store",
+      "finding": "wave 2 shipped the importable store API: Envelope/put/get/list/migrate, files backend dependency-free, mongo+neo4j behind [store], eidetic-cli consumes it over a subprocess boundary \u2014 #7's evaluate-before-building clause now has a real API to evaluate",
+      "seeds": [
+        "c4"
+      ]
+    },
+    {
+      "id": "s5",
+      "surface": "eidetic recall --scope events-cli (first-slice frame memories)",
+      "finding": "prior decisions recalled, not re-derived: paho base dep (q1), hand-rolled CLI stays with MCP+HTTP-only derivation (q2), pipelines deferred (q3/q4), dynsec parked as v1 nonblocking; plus the envelope gotcha flagged for #7 \u2014 evt_ ULIDs sort at millisecond granularity only, no intra-ms monotonicity",
+      "seeds": [
+        "c5"
+      ]
+    },
+    {
+      "id": "s6",
+      "surface": "events_cli/stack/templates/mosquitto.conf",
+      "finding": "allow_anonymous true is documented in the template as temporary ('when they land, this line goes away' pointing at dynsec); the explicit listener replaces the 2.1.2 default listener set (no 9883 dashboard, no 9001 websocket); per_listener_settings false makes auth global; the file is regenerated by events init --force so dynsec config lands via the template, not hand edits",
+      "seeds": [
+        "c6"
+      ]
+    },
+    {
+      "id": "s7",
+      "surface": "agentfront 0.20.0 installed via dev dep (App API + agentfront.testing probe)",
+      "finding": "assert_surfaces_agree imports cleanly; App exposes tool/add_command/group/http_app/mcp_server/registry \u2014 the teken->agentfront migration is done, so #6's prerequisite is already on main and the binding work is registry population + parity tests, not toolchain setup",
+      "seeds": [
+        "c7"
+      ]
+    },
+    {
+      "id": "s8",
+      "surface": "pyproject.toml [project] description",
+      "finding": "the description claims 'fronts it through agentfront as a CLI, an HTTP API and an MCP surface' in the present tense \u2014 HTTP/MCP are #6's unbuilt arc, so this is prose ahead of code on the package's own PyPI face",
+      "seeds": [
+        "c8"
+      ]
+    },
+    {
+      "id": "s9",
+      "surface": "docs/contract.md (built/not-built table + surfaces + delivery semantics)",
+      "finding": "the consumer-facing contract already states what each arc must preserve: the built/not-built table names #10 as not built, no emit/watch/pipeline verbs exist, the raw MQTT port is first-class, dedupe-on-id and retained-is-not-history are stated as requirements \u2014 each landing arc updates this file in the same PR or the contract lies",
+      "seeds": [
+        "c9",
+        "c10"
+      ]
+    },
+    {
+      "id": "s10",
+      "surface": "docs/specs/2026-07-23-events-first-slice.md (Decisions + deferred requirement rows)",
+      "finding": "the exported spec carries the deferred arcs as requirement rows with instruction+honesty conditions (agentfront binding, watch-as-cursor-drain) and freezes the CLI contract as a boundary \u2014 the second wave inherits these rows as its baseline; #1's non-goals are restated there as holding for every arc",
+      "seeds": [
+        "c9",
+        "c11"
+      ]
+    }
+  ]
+}
