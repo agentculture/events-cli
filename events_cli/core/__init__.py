@@ -34,6 +34,12 @@ from events_cli.core.errors import (
     FieldError,
     TopicValidationError,
 )
+from events_cli.core.identity import (
+    FALLBACK_NICK,
+    agent_nick,
+    find_culture_yaml,
+    read_agent_fields,
+)
 from events_cli.core.topics import (
     MQTT_MULTI_LEVEL_WILDCARD,
     MQTT_SINGLE_LEVEL_WILDCARD,
@@ -49,6 +55,7 @@ __all__ = [
     "ENVELOPE_FIELD",
     "ERROR_CODES",
     "EVENT_ID_PREFIX",
+    "FALLBACK_NICK",
     "MQTT_MULTI_LEVEL_WILDCARD",
     "MQTT_SINGLE_LEVEL_WILDCARD",
     "PATTERN_WILDCARD",
@@ -61,12 +68,15 @@ __all__ = [
     "EventsError",
     "FieldError",
     "TopicValidationError",
+    "agent_nick",
     "filter_matches_topic",
+    "find_culture_yaml",
     "new_event_id",
     "new_id",
     "now_rfc3339",
     "parse_rfc3339",
     "pattern_to_filter",
+    "read_agent_fields",
     "topic_to_type",
     "type_to_topic",
 ]
