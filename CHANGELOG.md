@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-07-24
+
+### Changed
+
+- `[project] description` no longer claims an HTTP API or an MCP surface. Both are the deferred agentfront binding ([#6](https://github.com/agentculture/events-cli/issues/6)), not shipped code, so the package's own PyPI-facing summary was prose ahead of the repository — the exact drift `CLAUDE.md`'s Known-drift rule exists to catch. It now names what is built: the envelope core, the importable client, and the stack verbs.
+
 ## [0.9.0] - 2026-07-24
 
 ### Added
