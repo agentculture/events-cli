@@ -1,0 +1,114 @@
+"""``events learn`` — the learnability affordance.
+
+Prints a structured self-teaching prompt. Must satisfy the agent-first rubric:
+>=200 chars and mention purpose, command map, exit codes, --json, and explain.
+"""
+
+from __future__ import annotations
+
+import argparse
+
+from events_cli import __version__
+from events_cli.cli._output import emit_result
+
+_TEXT = """\
+events — the AgentCulture event fabric.
+
+Purpose
+-------
+Runs and maintains a Dockerised Eclipse Mosquitto MQTT broker and fronts it as a
+CLI, an HTTP API and an MCP surface, so any app can import it, any service can
+call the API, and an agent or a human can publish and subscribe to events the
+same way. Mosquitto transports events; this tool defines what they mean — typed
+immutable envelopes, correlation and causation, durable history, pipeline runs.
+
+Status: the broker stack is implemented — init/up/status/logs/down operate a
+Dockerised Mosquitto deployment published on 127.0.0.1:1883 and nowhere else.
+The event contract on top of it (typed envelopes, correlation and causation,
+durable history, pipelines) is NOT implemented yet. See the repository issues
+for the specification being built against.
+
+Commands
+--------
+  events whoami             Identity from culture.yaml.
+  events learn              This self-teaching prompt.
+  events explain <path>...  Markdown docs for any noun/verb path.
+  events overview           Descriptive snapshot of the agent.
+  events doctor             Check the agent-identity invariants.
+  events cli overview       Describe the CLI surface itself.
+
+  events init               Generate the broker stack (compose + mosquitto.conf).
+  events up                 Start the broker. Refuses if another one holds 1883.
+  events status             Broker state and health. Exits 1 when unhealthy.
+  events logs               Last N lines of the broker log (no --follow).
+  events down               Stop and remove the broker.
+
+Machine-readable output
+-----------------------
+Every command supports --json. Errors in JSON mode emit
+{"code", "message", "remediation"} to stderr. Stdout and stderr never mix.
+
+Exit-code policy
+----------------
+  0 success
+  1 user-input error (bad flag, bad path, missing arg)
+  2 environment / setup error
+  3+ reserved
+
+More detail
+-----------
+  events explain events
+"""
+
+
+def _as_json_payload() -> dict[str, object]:
+    return {
+        # Three distinct names, all machine-discoverable: the command an agent
+        # invokes, the distribution it installs, and the module it imports.
+        "tool": "events",
+        "distribution": "events-cli",
+        "import_package": "events_cli",
+        "version": __version__,
+        "purpose": (
+            "The AgentCulture event fabric: a Dockerised Mosquitto MQTT broker fronted "
+            "as a CLI, an HTTP API and an MCP surface. The broker stack is implemented; "
+            "the event contract on top of it (envelopes, history, pipelines) is not."
+        ),
+        "commands": [
+            {"path": ["whoami"], "summary": "Identity probe from culture.yaml."},
+            {"path": ["learn"], "summary": "Self-teaching prompt."},
+            {"path": ["explain"], "summary": "Markdown docs by path."},
+            {"path": ["overview"], "summary": "Descriptive snapshot of the agent."},
+            {"path": ["doctor"], "summary": "Check the agent-identity invariants."},
+            {"path": ["cli", "overview"], "summary": "Describe the CLI surface."},
+            {"path": ["init"], "summary": "Generate the loopback-only broker stack."},
+            {"path": ["up"], "summary": "Start the broker; refuses on a foreign one."},
+            {"path": ["status"], "summary": "Broker state and health."},
+            {"path": ["logs"], "summary": "Last N lines of the broker log."},
+            {"path": ["down"], "summary": "Stop and remove the broker."},
+        ],
+        "exit_codes": {
+            "0": "success",
+            "1": "user-input error",
+            "2": "environment/setup error",
+        },
+        "json_support": True,
+        "explain_pointer": "events explain <path>",
+    }
+
+
+def cmd_learn(args: argparse.Namespace) -> int:
+    if getattr(args, "json", False):
+        emit_result(_as_json_payload(), json_mode=True)
+    else:
+        emit_result(_TEXT, json_mode=False)
+    return 0
+
+
+def register(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser(
+        "learn",
+        help="Print a structured self-teaching prompt for agent consumers.",
+    )
+    p.add_argument("--json", action="store_true", help="Emit structured JSON.")
+    p.set_defaults(func=cmd_learn)

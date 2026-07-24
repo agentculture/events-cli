@@ -1,6 +1,6 @@
 [project]
 name = "events-cli"
-version = "0.7.0"
+version = "0.9.0"
 description = "Agent and CLI that runs and maintains a Dockerised Eclipse Mosquitto MQTT broker and fronts it through agentfront as a CLI, an HTTP API and an MCP surface — so any app can import it, any service can call the API, and an agent or a human can publish and subscribe to events the same way."
 readme = "README.md"
 license = "Apache-2.0"
@@ -13,21 +13,26 @@ classifiers = [
     "Topic :: Software Development",
     "Intended Audience :: Developers",
 ]
-dependencies = []
+dependencies = [
+    "paho-mqtt>=2,<3",
+]
 
 [project.urls]
 Homepage = "https://github.com/agentculture/events-cli"
 Issues = "https://github.com/agentculture/events-cli/issues"
 
 [project.scripts]
-events = "events.cli:main"
+# Three names, deliberately distinct: the distribution is `events-cli`, the
+# console command is `events`, and the import package is `events_cli` (PyPI's
+# `Events` distribution already owns the top-level module `events`).
+events = "events_cli.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["events"]
+packages = ["events_cli"]
 
 [dependency-groups]
 dev = [
@@ -38,14 +43,14 @@ dev = [
     "flake8>=6.1",
     "isort>=5.12.0",
     "black>=23.7.0",
-    "teken>=0.8",
+    "agentfront>=0.20",
 ]
 
 [tool.coverage.run]
-source = ["events"]
-omit = ["events/__pycache__/*"]
+source = ["events_cli"]
+omit = ["events_cli/__pycache__/*"]
 # Emit repo-relative paths in coverage.xml so SonarCloud maps them to
-# sonar.sources=events (absolute/.venv paths fail to map → empty coverage).
+# sonar.sources=events_cli (absolute/.venv paths fail to map → empty coverage).
 relative_files = true
 
 [tool.coverage.report]
@@ -60,7 +65,7 @@ exclude_lines = [
 [tool.isort]
 profile = "black"
 line_length = 100
-known_first_party = ["events"]
+known_first_party = ["events_cli"]
 
 [tool.black]
 line-length = 100
@@ -72,4 +77,13 @@ skips = ["B101", "B404", "B603"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra"
+# The default selection excludes the marked suites: `perf` carries the only
+# wall-clock timing assertion (the enqueue-latency bound) and `stack` needs a
+# live broker/docker. CI runs this default selection, so neither a loaded runner
+# nor a missing broker can make the quality gate flaky. Run them explicitly with
+# `pytest -m perf` / `pytest -m stack`.
+addopts = "-ra -m 'not perf and not stack'"
+markers = [
+    "perf: wall-clock performance assertion (e.g. enqueue latency); excluded by default",
+    "stack: needs a live broker or docker stack; excluded by default",
+]

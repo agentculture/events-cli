@@ -217,8 +217,8 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Local agent-tooling state (afi-cli predecessor + devex PR lifecycle)
-.teken/
+# Local agent-tooling state (agentfront rubric gate + devex PR lifecycle)
+.agentfront/
 .devex/
 .agex/
 
@@ -228,3 +228,8 @@ __marimo__/
 
 # Per-machine skills config (copy from skills.local.yaml.example)
 skills.local.yaml
+
+# devague working state (not committed by default)
+.devague/questions/
+
+.devague/reviews/

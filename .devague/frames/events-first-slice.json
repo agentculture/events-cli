@@ -1,0 +1,701 @@
+{
+  "slug": "events-first-slice",
+  "title": "events first slice",
+  "schema_version": 3,
+  "status": "exported",
+  "created": "2026-07-23T16:38:10Z",
+  "updated": "2026-07-23T20:18:01Z",
+  "claims": [
+    {
+      "id": "c1",
+      "kind": "announcement",
+      "text": "events-cli ships its first vertical slice: a loopback-only Mosquitto stack on spark-f8a9 replacing the nova brokers, a CloudEvents envelope core, an importable O(1)-enqueue client on PyPI that unblocks reachy-mini-cli, and agentfront-derived CLI/MCP/HTTP surfaces \u2014 issues #1 #2 #3",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h1",
+          "text": "The slice is real end-to-end: a fresh machine-local install of the released wheel plus events init/up yields a broker one process publishes to and another subscribes from, with nothing listening off-loopback and no manual steps outside the documented verbs",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Verify on spark-f8a9 against issue #3's acceptance checklist: fresh install of the released wheel, events init && events up, ss -ltn shows 1883 on 127.0.0.1 only, pub/sub round-trip with retained+LWT+QoS0, nova pair absent, sub-millisecond client enqueue measured by test"
+    },
+    {
+      "id": "c2",
+      "kind": "requirement",
+      "text": "Core envelope module: CloudEvents-compatible immutable envelope (id, type, source, time, schemaVersion, data) plus tracing fields (correlationId, causationId, runId, trace context, producer identity, delivery attempt) with pure, dockerless validation \u2014 built first, as the module every other surface derives from (issue #1 contract, CLAUDE.md roadmap step 1)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h2",
+          "text": "Envelope validation runs pure: pytest passes with no docker or broker present; malformed envelopes are rejected with named field-level reasons; a valid envelope round-trips id/type/source/time/schemaVersion/correlation/causation/runId unchanged through serialize and parse",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Implement as the core module (e.g. events/core/): envelope type + validate() with field-level named errors, stdlib-only; property test parse(serialize(e)) == e; generated evt_ ids; correlation/causation/runId optional tracing fields per issue #1; zero docker in these tests"
+    },
+    {
+      "id": "c3",
+      "kind": "requirement",
+      "text": "Importable client surface per the #3 operator amendment: events-cli the package exposes a publish client \u2014 O(1) enqueue from the caller thread with network I/O on background machinery, retained publishes, Last Will, QoS 0, never raises into the caller on broker-unreachable, observable connection state \u2014 shipped as a pure-Python wheel (py>=3.12) on PyPI; the first release carrying this API is reachy-mini-cli composition unblock",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h3",
+          "text": "A publish from a non-owner thread measures as an O(1) sub-millisecond enqueue (asserted by a test, not claimed); with the broker unreachable, constructing the client and publishing raises nothing into the caller and connection state is observable; the wheel installs on py3.12 pulling only paho-mqtt",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Implement as the client module wrapping paho-mqtt >=2,<3: connect_async + reconnect on the client's own loop thread, queue-backed publish returning immediately, LWT configured before connect, observable connection state; a test measures enqueue latency with a monotonic clock from a non-owner thread; broker-unreachable paths covered by test"
+    },
+    {
+      "id": "c4",
+      "kind": "requirement",
+      "text": "Stack verbs events init/up/status/logs/down generate a Compose deployment pinned to eclipse-mosquitto:2 with the port mapping explicitly 127.0.0.1:1883:1883, persistence true plus a mounted volume, and a healthcheck; the generated mosquitto.conf states which security properties are upstream 2.0 defaults rather than a hardening layer",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h4",
+          "text": "events init writes a compose file containing the literal mapping 127.0.0.1:1883:1883 and persistence true with a mounted volume; events up reaches a passing healthcheck; retained state survives a docker restart of the broker (the first-restart test #2 warns is easy to omit)",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Register a stack noun group in events/cli: init writes compose + mosquitto.conf (pinned eclipse-mosquitto:2, literal 127.0.0.1:1883:1883, persistence true + named volume, mosquitto_sub healthcheck, conf comments naming which properties are upstream defaults); up/down/logs/status drive docker compose via stdlib subprocess (issue #9 tracks the shell-cli revisit); acceptance = the docker-restart retained-state test"
+    },
+    {
+      "id": "c5",
+      "kind": "requirement",
+      "text": "Migration on spark-f8a9: the events-cli deploy stops the nova stack (nova-mosquitto, nova-nervous-system) as a documented deliberate step so exactly one broker runs on the box \u2014 verified live today: bare 1883:1883 mapping, 0.0.0.0:1883 and 0.0.0.0:9001 bound, allow_anonymous true",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h5",
+          "text": "After the deploy on spark-f8a9, docker ps shows exactly one broker container; nova-mosquitto and nova-nervous-system are stopped with the migration recorded in docs; ss -ltn shows no 0.0.0.0 binding on 1883 or 9001; the untouched neighbours (eidetic, model-gear, qq) are still running",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Ship as an events up preflight plus a documented migration: detect a foreign broker on 1883 (nova-mosquitto), refuse to double-bind, and print the exact stop command; the operator-run migration stops nova-mosquitto and nova-nervous-system; verify with ss -ltn and docker ps; record the step in docs"
+    },
+    {
+      "id": "c6",
+      "kind": "requirement",
+      "text": "agentfront binding: one App registry populated from the core events module, deriving CLI, MCP (behind the [mcp] extra) and HTTP; the import-events lane is fed from the same core so the fourth surface cannot drift; agentfront.testing.assert_surfaces_agree runs in the test suite",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h6",
+          "text": "When the binding lands (#6): the registry is populated from the core module, agentfront.testing.assert_surfaces_agree passes in CI, every MCP/HTTP tool has non-infinite --max/--timeout defaults, and the CLI parity tests fail if a registry tool lacks a CLI verb equivalent",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Tracked as #6, its own arc: build the agentfront App registry from the core module, derive http_app() and mcp_server() ([mcp] extra), add assert_surfaces_agree plus CLI/registry parity tests; every tool bounded with --max/--timeout defaults"
+    },
+    {
+      "id": "c7",
+      "kind": "requirement",
+      "text": "Migrate the dev dependency and CI gate from teken>=0.8 to agentfront (0.20.0 live): pyproject dev group, uv.lock, the CI step uv run teken cli doctor . --strict, plus stale references in docs/skill-sources.md, .claude/skills.local.yaml.example and .markdownlint-cli2.yaml \u2014 behaviourally inert housekeeping, but it must ride this arc since the binding depends on agentfront",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h7",
+          "text": "After the migration, uv.lock resolves agentfront (not teken), CI runs uv run agentfront cli doctor . --strict and passes, and no repo file outside CHANGELOG references teken (docs/skill-sources.md, .claude/skills.local.yaml.example, .markdownlint-cli2.yaml all updated)",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "One housekeeping PR riding this arc: dev dep teken>=0.8 -> agentfront, uv.lock regenerated, CI step becomes uv run agentfront cli doctor . --strict, sweep docs/skill-sources.md + .claude/skills.local.yaml.example + .markdownlint-cli2.yaml; version bump per convention"
+    },
+    {
+      "id": "c8",
+      "kind": "requirement",
+      "text": "watch is durable server-side subscriptions plus cursor drain: named persistent subscriptions owned by an identity, drained via --since <cursor> --max N --timeout, with non-infinite defaults on every agent-facing tool; unbounded streaming stays CLI/HTTP-SSE only; designed together with history since replay-from-cursor and survive-a-restart are the same machinery (issue #2 hard constraint)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h8",
+          "text": "When durable subscriptions land (#7): a drain call returns within its timeout with at most --max events plus a cursor; resuming from that cursor loses nothing acknowledged; a broker restart preserves both subscription registrations and undrained history",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Tracked as #7, its own arc designed with history: named identity-owned subscriptions, control-service store (evaluate eidetic-cli / data-refinery-cli first per #2), drain verb --since/--max/--timeout with non-infinite defaults, streaming only on CLI/HTTP-SSE"
+    },
+    {
+      "id": "c9",
+      "kind": "assumption",
+      "text": "The raw MQTT port stays a first-class documented surface for co-located latency-sensitive producers; producer-owned topic trees (reachy/events/{source}/{type}, retained reachy/state/{key}) are never forced through envelope validation or pipelines; anonymous auth on loopback is acceptable for this slice (issue #3)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c10",
+      "kind": "assumption",
+      "text": "The contract states consumer-side idempotency keyed on event id as a requirement, because QoS 1 is at-least-once and exactly-once is a non-goal; retained messages are documented as last-value, not history \u2014 history lives in the control-service store",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c11",
+      "kind": "assumption",
+      "text": "events up shells out to docker via stdlib subprocess for this slice: shell-cli, which owns the confinement lane, is scaffold-only today (no operation, policy or runner built), so routing through it is deferred and documented rather than silently skipped",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c12",
+      "kind": "boundary",
+      "text": "The existing CLI contract survives the agentfront binding: stdout/stderr split (_output.py), CliError exit-code policy (_errors.py), no tracebacks, and the explain catalog keeping BOTH root keys (events,) and (events-cli,) \u2014 the rubric gate and pinned tests must stay green throughout",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h9",
+          "text": "The rubric gate (cli doctor --strict) and the pinned contract tests \u2014 dual catalog root keys, prog resolution, stdout/stderr split, exit codes \u2014 pass unchanged on every PR of this arc",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Treat _output.py and _errors.py as frozen; every new verb goes through register(sub) plus a catalog entry; the existing pinned tests and the rubric gate are the enforcement \u2014 no new formatter or error path"
+    },
+    {
+      "id": "c13",
+      "kind": "boundary",
+      "text": "Mesh lane boundary stated in the README: culture carries agent conversation (peer-to-peer, human-readable, IRC-shaped); events-cli carries machine events (typed immutable envelopes, correlation/causation, durable history, pipeline runs) \u2014 one sentence that stops contributors guessing",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h10",
+          "text": "The README states the two-lane boundary in one sentence, and no events-cli surface accepts or relays agent conversation \u2014 machine envelopes only",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Add the one-sentence lane statement to the README (culture = agent conversation, events-cli = machine events), citing issue #2's adjudication"
+    },
+    {
+      "id": "c14",
+      "kind": "non_goal",
+      "text": "Issue #1 non-goals hold for this arc: no reimplementing MQTT, no multiple broker technologies, no Kubernetes, no GUI, no arbitrary user code inside the Events service, no general-purpose workflow engine, no exactly-once guarantees",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c15",
+      "kind": "non_goal",
+      "text": "No bespoke history store is built from scratch: eidetic-cli and data-refinery-cli already own the memory/storage lane and are evaluated first before any control-service persistence beyond mosquitto state lands",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c16",
+      "kind": "boundary",
+      "text": "Docker is never a unit-test dependency: envelope validation and pipeline-transition logic stay pure with high coverage; broker/stack integration tests are marked and separately selectable so the SonarCloud quality gate never depends on a live broker",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h11",
+          "text": "The unit suite passes on a machine with no docker and no broker (CI proves this on every PR); stack integration tests carry a pytest marker excluded by default and are selected explicitly",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Add a pytest marker (e.g. stack) for broker/docker integration tests, excluded by default in addopts; unit coverage of envelope + client logic stays dockerless; Sonar coverage comes from the default selection only"
+    },
+    {
+      "id": "c17",
+      "kind": "audience",
+      "text": "Co-located producers and consumers on spark-f8a9 first: reachy-mini-cli 50 Hz publisher and its reTerminal-bridge consumer; then any Python app importing events, any service on the HTTP API, agents over MCP, and humans on the events CLI",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h12",
+          "text": "The named first consumers are real, not aspirational: reachy-mini-cli's spec codes against the injected client seam today, and the reTerminal bridge is its declared first subscriber \u2014 both verified in that repo's committed spec",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c18",
+      "kind": "after_state",
+      "text": "Exactly one loopback-only Mosquitto broker runs on spark-f8a9, created and managed by events init/up/status/logs/down; the nova stack is gone; reachy-mini-cli binds its injected client seam to the released events-cli wheel in one composition line, its events flow on reachy/events/# and retained state on reachy/state/# survives broker restarts; the envelope core validates events with zero broker or docker dependency",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h13",
+          "text": "Every element of the after-state is mechanically checkable on spark-f8a9: docker ps shows one broker, the stack verbs manage it, the reachy composition line imports the released wheel, and the restart test shows retained state surviving",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c19",
+      "kind": "before_state",
+      "text": "Today the box runs nova-mosquitto LAN-exposed on 0.0.0.0:1883/9001 with allow_anonymous true, coupled to nova-nervous-system; reachy-mini-cli publishes against a fake client because no owned broker exists; events/ contains only the introspection scaffold with zero event, broker or client code",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h14",
+          "text": "The before-state is evidence, not narrative: ss -ltn and docker ps captured 0.0.0.0:1883/9001 and the nova pair on 2026-07-23, and the events/ package contains no MQTT, docker or envelope code at that date's HEAD",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c20",
+      "kind": "why_it_matters",
+      "text": "Agents and applications in the mesh need a shared machine-event substrate without service-to-service coupling \u2014 culture carries conversation, nothing carries typed correlated events; the reachy nervous-system arc is blocked on it today, and every future consumer (reTerminal, tau, daria, devague) inherits whatever contract ships first",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h15",
+          "text": "The blocked-consumer claim is traceable: reachy-mini-cli's converged spec and events-cli#3 both record that its broker-dependent acceptance items wait on this slice; no other machine-event substrate exists in the mesh today",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c21",
+      "kind": "success_signal",
+      "text": "Issue #3 acceptance passes end-to-end on spark-f8a9: ss -ltn shows 1883 bound on 127.0.0.1 only; a mosquitto_pub/sub round-trip demonstrates retained messages, LWT and QoS 0; a loopback client connects without credentials; the nova pair is stopped; and a co-located process importing the released PyPI wheel publishes one retained message and one QoS 0 event with the publish call measuring as a sub-millisecond enqueue",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h16",
+          "text": "The success signal is exactly issue #3's acceptance checklist plus its amendment's sub-millisecond enqueue criterion \u2014 verified on the deploy box, each item a command with observable output, none a judgment call",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c22",
+      "kind": "decision",
+      "text": "paho-mqtt >=2,<3 is a BASE dependency: pip install events-cli carries the publish client; the deps=[] posture is deliberately given up (user decision 2026-07-23, q1)",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c23",
+      "kind": "decision",
+      "text": "The hand-rolled argparse CLI stays the CLI surface; the agentfront App registry is fed from the same core and derives MCP + HTTP only, with CLI/registry parity pinned by our own tests (user decision 2026-07-23, q2)",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c24",
+      "kind": "decision",
+      "text": "Pipelines are deferred: this arc ships producer-owned reachy topics only; whether devague is the first pipeline consumer is decided when the pipeline layer is built (user decision 2026-07-23, q3)",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c25",
+      "kind": "decision",
+      "text": "First arc = the #3 unblock slice \u2014 envelope core, importable client, stack verbs, nova migration, PyPI release; deferred and tracked on this repo: agentfront MCP/HTTP binding (#6), durable subscriptions + history (#7), pipelines (#8), shell-cli routing for events up (#9), dynsec identities / remote opt-in (#10); issue #1 pipeline acceptance is explicitly NOT met by this slice (user decision 2026-07-23, q4)",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c26",
+      "kind": "boundary",
+      "text": "The paho-mqtt import is lazy: introspection verbs (whoami, doctor, learn, explain) keep working from a bare checkout with no dependencies installed, preserving the documented PYTHONPATH=. python3 -m events fallback \u2014 the base dep (q1) must not break the no-install lane [challenge pass / hidden-dependencies lens: CLAUDE.md no-install fallback + q1 decision]",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h18",
+          "text": "A CI-run test exercises the introspection verbs from a tree where paho-mqtt is not installed and they pass \u2014 the no-install lane is proven per PR, not assumed",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c27",
+      "kind": "requirement",
+      "text": "The compose pins an exact Mosquitto version tag, not the floating eclipse-mosquitto:2 \u2014 the upstream-default annotations in the generated mosquitto.conf are only true for a specific version, and an unpinned tag can change security behavior under the deploy silently [challenge pass / operations lens: c4 vs CLAUDE.md verify-against-the-version-you-pin constraint]",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h19",
+          "text": "The generated compose contains an exact mosquitto version tag and a unit test fails if the template ever carries a bare floating major tag",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c28",
+      "kind": "requirement",
+      "text": "The migration is reversible and says so: the migration doc records the exact rollback command (the nova compose file remains in reachy_nova) so a failed events-cli stack can be rolled back to the nova broker in one step during the cutover window [challenge pass / reversibility lens: docker-compose.nervous-system.yml still on disk]",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h20",
+          "text": "The migration doc names the exact one-command rollback, and the cutover runbook is exercised once on spark-f8a9 (forward, back, forward) before the migration is called done",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c29",
+      "kind": "requirement",
+      "text": "The client generates a unique per-process client id by default (caller-overridable): MQTT brokers disconnect the existing session on client-id takeover, so two co-located producers or CLI sessions sharing a default id would kick each other into reconnect loops \u2014 the robot publisher, the reTerminal bridge and ad-hoc CLI probes all connect to the same loopback broker [challenge pass / concurrency lens: MQTT session-takeover semantics + issue #3 consumer set]",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h21",
+          "text": "An integration test connects two default-constructed clients concurrently and both stay connected \u2014 default client ids observed unique across processes",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c30",
+      "kind": "assumption",
+      "text": "Retained-state durability has a bound: clean broker shutdown (SIGTERM via docker stop/restart) persists retained state, but an uncleanly killed broker may lose writes since the last autosave \u2014 the generated mosquitto.conf sets autosave_interval explicitly and the docs state the bound instead of implying retained state is unconditionally durable [challenge pass / failure-modes lens: persistence semantics, to be verified by the kill-broker integration test]",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h17",
+          "text": "An integration test (stack-marked) kills the broker container uncleanly after a retained publish and the docs state exactly what survived \u2014 the durability claim is measured, not assumed",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c31",
+      "kind": "boundary",
+      "text": "The sub-millisecond enqueue assertion runs as a marked perf test with generous headroom or outside the default CI selection: a wall-clock timing assertion on shared CI runners will eventually flake, and c16 forbids flaky inputs to the Sonar gate [challenge pass / counter-evidence lens: h3 vs c16]",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h22",
+          "text": "The default pytest selection (the one CI and Sonar see) contains no wall-clock timing assertion; the enqueue measurement runs behind a marker with a documented generous bound",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c32",
+      "kind": "non_goal",
+      "text": "No WebSocket listener in the first slice: nova exposed 9001 for debugging; the new stack does not, and websockets return (if ever) via the #7 streaming lane as an explicit opt-in [challenge pass / adjacent-systems lens: nova mosquitto.conf 9001 + traffic probe]",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c33",
+      "kind": "decision",
+      "text": "The import package is renamed events -> events_cli before the first consumer binds (user decision 2026-07-23, resolves q5): PyPI 'Events' 0.5 owns import events, and the cheapest moment to vacate the collision is while zero consumers exist; the console command stays events, the dist stays events-cli",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Rename the events/ package dir to events_cli/, update [project.scripts] (events = events_cli.cli:main), hatch packages, coverage source, isort known_first_party, and the no-install fallback docs (python -m events_cli); the explain-catalog keys are command-path names tied to the console command and stay ('events',)/('events-cli',); update the repo description and note the change on issue #2's provisioning record"
+    }
+  ],
+  "open_vagueness": [
+    {
+      "id": "v1",
+      "text": "Identity/ACL timing: anonymous-on-loopback is accepted for this slice; when remote opt-in or multi-identity lands, mosquitto_ctrl dynsec (runtime JSON config, no reload per change) is the mechanism \u2014 but when identities become mandatory is not decidable until someone actually needs remote access",
+      "kind": "unknown_nonblocking",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v2",
+      "text": "Residual after the rigorous pass: mosquitto autosave/persistence semantics were asserted from general knowledge, not upstream docs read in this pass (bounded by the kill-broker test on c30); the traffic probe window was 8s, so a rarely-connecting silent subscriber would not have appeared; 9001 websocket consumers are very unlikely (nervous-system uses 1883 per its compose env) but not conclusively ruled out",
+      "kind": "unknown_nonblocking",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    }
+  ],
+  "scope_entries": [
+    {
+      "id": "s1",
+      "surface": "issue #1 (events-cli scaffold spec)",
+      "finding": "the requirements baseline: CloudEvents envelope with tracing fields, declarative pipeline model, stack verbs, security defaults, 14 acceptance criteria and 7 explicit non-goals; design principle 'Mosquitto transports events, events-cli defines what they mean'",
+      "seeds": [
+        "c2",
+        "c4",
+        "c14"
+      ]
+    },
+    {
+      "id": "s2",
+      "surface": "issue #2 (build brief: agentfront binding, watch constraint, mesh lanes)",
+      "finding": "agentfront is a named requirement #1 omits \u2014 one App registry, three derived surfaces, the import lane fed from the same core; watch cannot fit MCP/HTTP request-response, so durable subscriptions + bounded cursor drain must be designed with history; lane boundary vs culture must be stated; eidetic-cli/data-refinery-cli own the store lane; Docker must not become a unit-test dependency",
+      "seeds": [
+        "c6",
+        "c8",
+        "c10",
+        "c13",
+        "c15",
+        "c16"
+      ]
+    },
+    {
+      "id": "s3",
+      "surface": "issue #3 + operator amendment comment (2026-07-23)",
+      "finding": "reachy-mini-cli imports events-cli's client surface instead of paho \u2014 O(1) enqueue, retained, LWT, QoS 0, never-raises, pure wheel py>=3.12 on PyPI as their base dep; raw 1883 stays first-class for co-located producers; loopback-only compose mapping mandated; nova stack replacement is the operator's decided migration",
+      "seeds": [
+        "c3",
+        "c5",
+        "c9"
+      ]
+    },
+    {
+      "id": "s4",
+      "surface": "spark-f8a9 live state (docker ps, ss -ltn, hostname)",
+      "finding": "this box IS spark-f8a9; nova-mosquitto (eclipse-mosquitto:2) and nova-nervous-system run now with 1883 and 9001 bound on 0.0.0.0 \u2014 the exact exposure #3 forbids; eidetic-mongo/neo4j and the model-gear stack share the box, so the migration must touch only the nova pair",
+      "seeds": [
+        "c5"
+      ]
+    },
+    {
+      "id": "s5",
+      "surface": "reachy_nova docker-compose.nervous-system.yml + config/mosquitto/mosquitto.conf",
+      "finding": "the stack being replaced uses a bare 1883:1883 mapping, allow_anonymous true, a websockets listener on 9001, persistence true with named volumes, and a mosquitto_sub healthcheck \u2014 the persistence+healthcheck patterns are worth carrying into the generated compose, the port mapping and exposure are not",
+      "seeds": [
+        "c4",
+        "c5"
+      ]
+    },
+    {
+      "id": "s6",
+      "surface": "pyproject.toml + .github/workflows/tests.yml",
+      "finding": "runtime dependencies = [] today; dev group pins teken>=0.8 and CI runs 'uv run teken cli doctor . --strict' plus pytest+coverage+SonarCloud on every PR and a version-check job that blocks unbumped PRs \u2014 the teken->agentfront migration touches dev dep, lockfile and CI step together",
+      "seeds": [
+        "c7",
+        "c16"
+      ]
+    },
+    {
+      "id": "s7",
+      "surface": "agentfront checkout (README.md, agentfront/app.py, agentfront/testing)",
+      "finding": "importable runtime at 0.20.0 (installed tool is 0.18.0): App.tool/add_docs_dir feed one registry; app.cli()/http_app()/mcp_server() derive the surfaces; MCP behind the [mcp] extra raising a named ModuleNotFoundError without it; agentfront.testing.assert_surfaces_agree makes surface-agreement testable",
+      "seeds": [
+        "c6"
+      ]
+    },
+    {
+      "id": "s8",
+      "surface": "events/cli package + explain catalog (per CLAUDE.md)",
+      "finding": "the scaffold's CLI contract is marked stable: single parser with lazy register(), _output.py stdout/stderr split, _errors.py exit codes, catalog mapping BOTH ('events',) and ('events-cli',) to root with tests pinning them \u2014 the binding must preserve all of it or the rubric gate fails",
+      "seeds": [
+        "c12"
+      ]
+    },
+    {
+      "id": "s9",
+      "surface": "shell-cli README",
+      "finding": "shell-cli is the confinement lane owner but is scaffold-only: 'no operation, environment, policy, or runner has been built yet' \u2014 events up cannot route docker invocations through it today, so stdlib subprocess with a documented revisit note is the honest posture",
+      "seeds": [
+        "c11"
+      ]
+    },
+    {
+      "id": "s10",
+      "surface": "reachy-mini-cli spec (docs/specs/2026-07-23-reachy-nervous-system.md) + docs/export-schema.md",
+      "finding": "the consumer codes against an injected client seam, binds the real import in one composition line once the first events-cli wheel ships (base dep + uv lock same change), reads REACHY_MQTT_URL defaulting localhost:1883, ships no compose of its own, and never carries media payloads in events",
+      "seeds": [
+        "c3",
+        "c9"
+      ]
+    },
+    {
+      "id": "s11",
+      "surface": "eidetic recall (--scope events-cli)",
+      "finding": "no prior events-cli implementation decisions in memory \u2014 only eidetic's own roadmap surfaced; the three issues genuinely are the whole requirements baseline",
+      "seeds": []
+    },
+    {
+      "id": "s12",
+      "surface": "challenge pass / adjacent-systems lens: live nova-mosquitto traffic (wildcard + $SYS probe)",
+      "finding": "2 connected clients (this probe + nova-nervous-system), zero live event traffic in an 8s window, only two retained nova/state/* values \u2014 nothing else on the box consumes the broker, so the migration orphans only the nova pair's own state",
+      "seeds": [
+        "c5"
+      ]
+    },
+    {
+      "id": "s13",
+      "surface": "challenge pass / hidden-dependencies lens: PyPI namespace (pypi.org/pypi/events/json)",
+      "finding": "PyPI 'Events' 0.5 owns import events; events-cli 0.7.0 ships the same top-level module \u2014 collision confirmed by probe, routed as q5 (user decision: rename vs document+guard)",
+      "seeds": []
+    },
+    {
+      "id": "s14",
+      "surface": "challenge pass / operations lens: docker compose + host tooling probes",
+      "finding": "Docker Compose v5.0.1 plugin present on spark-f8a9; host has no mosquitto_pub/mosquitto_sub, so issue #3's pub/sub acceptance round-trip runs via docker exec into the broker container (as this pass's probe did)",
+      "seeds": [
+        "c4"
+      ]
+    },
+    {
+      "id": "s15",
+      "surface": "challenge pass / failure-modes lens: localhost resolution (getent ahosts)",
+      "finding": "localhost resolves to 127.0.0.1 only on spark-f8a9, so the v4-only compose mapping cannot silently no-op a localhost-dialing client on this box; on dual-stack boxes a v6-first localhost could \u2014 client docs should prefer explicit 127.0.0.1",
+      "seeds": [
+        "c9"
+      ]
+    },
+    {
+      "id": "s16",
+      "surface": "challenge pass / concurrency lens: co-located client set",
+      "finding": "robot publisher + reTerminal bridge + ad-hoc CLI sessions share one loopback broker; MQTT client-id takeover would make same-id clients kick each other \u2014 seeded the unique-client-id requirement",
+      "seeds": [
+        "c29"
+      ]
+    },
+    {
+      "id": "s17",
+      "surface": "challenge pass / reversibility lens: nova rollback path",
+      "finding": "reachy_nova's docker-compose.nervous-system.yml remains on disk after the stack is stopped, so a one-command rollback exists during the cutover window \u2014 seeded the documented-rollback requirement",
+      "seeds": [
+        "c28"
+      ]
+    },
+    {
+      "id": "s18",
+      "surface": "challenge pass / security lens: compose mapping + upstream defaults",
+      "finding": "c4/c9 examined against the live anti-pattern and Mosquitto 2.0 defaults; clean beyond the exact-version-pin finding \u2014 the loopback mapping, anonymous-on-loopback posture and no-listener defaults hold as specified",
+      "seeds": [
+        "c27"
+      ]
+    }
+  ]
+}

@@ -5,12 +5,12 @@ on:
     branches: [main]
     paths:
       - "pyproject.toml"
-      - "events/**"
+      - "events_cli/**"
   pull_request:
     branches: [main]
     paths:
       - "pyproject.toml"
-      - "events/**"
+      - "events_cli/**"
 
 jobs:
   test:
