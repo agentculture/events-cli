@@ -80,6 +80,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 from events_cli.cli._errors import EXIT_ENV_ERROR, EXIT_USER_ERROR, CliError
@@ -103,6 +104,19 @@ __all__ = ["cmd_emit", "register"]
 _EMIT_QOS = 1
 
 _STDIN_MARKER = "-"
+
+#: How long ``emit`` waits for the asynchronous connection to come up, and then
+#: for the broker to acknowledge the publish. Two separate budgets because they
+#: fail differently and an operator should be able to tell them apart: no
+#: connection at all is "the broker is not there" (``connected=false``), an
+#: unconfirmed publish is "it is there and did not answer" (``unconfirmed``).
+#: Finite by policy — an unbounded wait is what hangs an agent turn.
+_CONNECT_WAIT = 10.0
+_DELIVERY_WAIT = 10.0
+
+#: How often to re-check the connection while waiting. Small enough that a local
+#: broker costs a millisecond or two, large enough not to spin a core.
+_POLL_INTERVAL = 0.02
 
 
 def _read_data(source: str | None) -> object:
@@ -151,16 +165,52 @@ def _default_source() -> str:
     return f"agent://{read_agent_fields()['nick']}"
 
 
+def _await_connection(client: EventClient, timeout: float) -> None:
+    """Block until the client is connected, or the bound expires. Never raises.
+
+    Deliberately here and not in :class:`~events_cli.client.EventClient`: that
+    class must never block, because its defining consumer publishes from inside
+    a 50 Hz robot control loop. A one-shot CLI invocation is the opposite case
+    and owns its own waiting.
+    """
+    deadline = time.monotonic() + timeout
+    while not client.is_connected and time.monotonic() < deadline:
+        time.sleep(_POLL_INTERVAL)
+
+
 def _publish(envelope: Envelope, topic: str) -> PublishResult:
     """The only place ``emit`` touches the network. Tests monkeypatch this.
 
     A short-lived client: ``emit`` is a one-shot CLI invocation, not a
     long-running producer, so there is no standing connection to reuse between
     calls and every reason to close it before the process exits.
+
+    That one-shot shape is why this blocks twice, where the importable client
+    never does — and both waits are load-bearing, not defensive:
+
+    1. **Wait for the connection.** :class:`~events_cli.client.EventClient`
+       connects *asynchronously* (``connect_async`` plus a background loop), so
+       a publish issued in the same breath as the constructor is always issued
+       while still disconnected. Without this wait ``emit`` reported
+       ``connected=false``/``no_conn`` and exited 2 against a perfectly healthy
+       broker, every single time — and the message, queued inside paho, was then
+       discarded by the ``close()`` below. Every existing unit test replaces
+       ``EventClient`` with a fake, so only the docker-backed round-trip in
+       ``tests/test_subs_integration.py`` could see it.
+    2. **Wait for the broker to take the message.** paho's own ``loop_stop``
+       docstring: "This don't guarantee that publish packet are sent, use
+       ``wait_for_publish`` or ``on_publish`` to ensure publish are sent." A
+       process that publishes and exits therefore has to wait, or it can report
+       success for bytes that never left.
+
+    Both bounds are finite, like every other bound in this repo: a broker that
+    is down costs ``_CONNECT_WAIT`` seconds and then reports a clean exit-2
+    failure rather than hanging the caller.
     """
     client = EventClient()
     try:
-        return client.publish_event(envelope, topic, qos=_EMIT_QOS)
+        _await_connection(client, _CONNECT_WAIT)
+        return client.publish_event(envelope, topic, qos=_EMIT_QOS, wait=_DELIVERY_WAIT)
     finally:
         client.close()
 

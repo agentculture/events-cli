@@ -518,3 +518,113 @@ def test_two_default_clients_connect_without_kicking_each_other() -> None:
     finally:
         a.close()
         b.close()
+
+
+# --- the optional delivery confirmation (`wait`) ----------------------------
+#
+# `wait` exists for ONE-SHOT callers such as `events emit`, and must stay off by
+# default: paho's `loop_stop` docstring is explicit that stopping the loop does
+# not guarantee a queued PUBLISH was sent, so a process that publishes and exits
+# has to wait — while the 50 Hz control loop this client was built for must
+# never block at all. Both halves are pinned here, with no socket.
+
+
+class _FakeInfo:
+    """A stand-in for paho's ``MQTTMessageInfo``. Records whether it was waited on."""
+
+    def __init__(self, *, rc, published: bool) -> None:
+        self.rc = rc
+        self.mid = 7
+        self._published = published
+        self.waited_for: float | None = None
+
+    def wait_for_publish(self, timeout=None) -> None:
+        # Real paho returns silently on expiry, so the answer must come from
+        # is_published() rather than from the absence of an exception.
+        self.waited_for = timeout
+
+    def is_published(self) -> bool:
+        return self._published
+
+
+def _success_rc(client: EventClient):
+    return client._mqtt.MQTTErrorCode.MQTT_ERR_SUCCESS
+
+
+def test_publish_does_not_wait_by_default() -> None:
+    """The hot lane never blocks: no ``wait`` argument means no confirmation wait."""
+    client = EventClient("127.0.0.1", 1, connect=False)
+    info = _FakeInfo(rc=_success_rc(client), published=False)
+    client._paho = MagicMock()
+    client._paho.publish.return_value = info
+
+    result = client.publish("reachy/events/head/moved", "{}")
+
+    assert result.ok is True
+    assert result.reason == "ok"
+    assert info.waited_for is None, "the default path must not wait for a confirmation"
+    client.close()
+
+
+def test_publish_with_wait_confirms_delivery() -> None:
+    client = EventClient("127.0.0.1", 1, connect=False)
+    info = _FakeInfo(rc=_success_rc(client), published=True)
+    client._paho = MagicMock()
+    client._paho.publish.return_value = info
+
+    result = client.publish("events/task/requested", "{}", qos=1, wait=2.5)
+
+    assert result.ok is True
+    assert result.reason == "ok"
+    assert info.waited_for == 2.5
+    client.close()
+
+
+def test_publish_with_wait_reports_an_unconfirmed_message() -> None:
+    """A message the broker never took is ``ok=False``, not an exception.
+
+    This is the failure a one-shot publisher must be able to see: paho accepted
+    the message, so the return code is success, but it never reached the wire
+    before the wait expired. Reporting it as ``ok=True`` would let `events emit`
+    exit 0 for an event nothing ever received.
+    """
+    client = EventClient("127.0.0.1", 1, connect=False)
+    info = _FakeInfo(rc=_success_rc(client), published=False)
+    client._paho = MagicMock()
+    client._paho.publish.return_value = info
+
+    result = client.publish("events/task/requested", "{}", qos=1, wait=0.1)
+
+    assert result.ok is False
+    assert result.reason == "unconfirmed"
+    assert result.mid == 7  # still identifies the message
+    client.close()
+
+
+def test_publish_wait_never_raises_when_paho_does() -> None:
+    """``wait_for_publish`` raises on a queue-full/failed message; the contract holds."""
+    client = EventClient("127.0.0.1", 1, connect=False)
+    info = _FakeInfo(rc=_success_rc(client), published=False)
+    info.wait_for_publish = MagicMock(side_effect=RuntimeError("Message publish failed"))
+    client._paho = MagicMock()
+    client._paho.publish.return_value = info
+
+    result = client.publish("events/task/requested", "{}", qos=1, wait=0.1)
+
+    assert result.ok is False
+    assert result.reason == "unconfirmed"
+    client.close()
+
+
+def test_publish_event_passes_wait_through() -> None:
+    client = EventClient("127.0.0.1", 1, connect=False)
+    info = _FakeInfo(rc=_success_rc(client), published=True)
+    client._paho = MagicMock()
+    client._paho.publish.return_value = info
+    env = Envelope.new("task.requested", "agent://builder", data={})
+
+    result = client.publish_event(env, "events/task/requested", wait=1.5)
+
+    assert result.ok is True
+    assert info.waited_for == 1.5
+    client.close()

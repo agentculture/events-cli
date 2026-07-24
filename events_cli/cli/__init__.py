@@ -10,7 +10,10 @@ Error propagation contract
 Every handler raises :class:`events_cli.cli._errors.CliError` on
 failure; ``main()`` catches it via :func:`_dispatch` and routes through
 :mod:`events_cli.cli._output`. Unknown exceptions are wrapped into a
-``CliError`` so no Python traceback leaks to stderr.
+``CliError`` so no Python traceback leaks to stderr. The one domain error
+translated by name is
+:class:`~events_cli.address.BrokerAddressError`, because it is raised below
+every verb rather than inside one — see :func:`_dispatch`.
 
 Argparse errors (unknown verb, missing arg) also route through the structured
 format — ``_CliArgumentParser`` overrides ``.error()`` and the subparsers are
@@ -25,7 +28,8 @@ import argparse
 import sys
 
 from events_cli import __version__
-from events_cli.cli._errors import EXIT_USER_ERROR, CliError
+from events_cli.address import BrokerAddressError
+from events_cli.cli._errors import EXIT_ENV_ERROR, EXIT_USER_ERROR, CliError
 from events_cli.cli._output import emit_error
 from events_cli.cli._prog import prog_name
 
@@ -139,6 +143,17 @@ def _dispatch(args: argparse.Namespace) -> int:
     except CliError as err:
         emit_error(err, json_mode=json_mode)
         return err.code
+    except BrokerAddressError as err:
+        # A malformed EVENTS_BROKER_HOST/PORT is discovered wherever a default
+        # address is first constructed — inside EventClient for `emit`, inside
+        # BrokerAddress for `sub`/`watch` — which is too deep for any one verb
+        # to own. It is an environment fault (exit 2) with a hint the resolver
+        # already wrote, so it is translated here rather than degraded into the
+        # "unexpected: ... file a bug" wrapper below, which would be exit 1 and
+        # would blame the wrong thing.
+        wrapped = CliError(code=EXIT_ENV_ERROR, message=str(err), remediation=err.remediation)
+        emit_error(wrapped, json_mode=json_mode)
+        return wrapped.code
     except Exception as err:  # noqa: BLE001 - last-resort; wrap and route cleanly
         wrapped = CliError(
             code=EXIT_USER_ERROR,

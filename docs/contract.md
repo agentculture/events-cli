@@ -395,6 +395,31 @@ One portability note for clients: prefer an explicit `127.0.0.1` over
 `localhost`. On a dual-stack host `localhost` can resolve v6-first, which would
 silently miss a v4-only published port.
 
+### Addressing a different broker
+
+`127.0.0.1:1883` is the *default*, not a hard-coded destination.
+`EVENTS_BROKER_HOST` / `EVENTS_BROKER_PORT` replace it for every lane that
+resolves a default address — `events sub add/remove`, `events watch`,
+`events emit`, and a default-constructed `EventClient()` in the import lane.
+Unset means the literal default, so nothing changes for a caller that never sets
+them, and an explicitly passed address (`EventClient("10.0.0.5", 1884)`,
+`BrokerAddress(...)`) is never overridden by the environment.
+
+This is deliberately an environment variable and not a CLI flag: one broker per
+host is the deployment model, so the address is a property of the host a process
+is talking to rather than a per-invocation choice, and a flag would have to be
+threaded through every verb that reaches a broker. Remote access as a
+*supported, documented surface* — with credentials and topic ACLs — remains
+[#10](https://github.com/agentculture/events-cli/issues/10)'s and will revisit
+the surface properly. The override does not widen the broker's network posture
+by itself: nothing about it changes what Compose publishes.
+
+A malformed `EVENTS_BROKER_PORT` is a hard failure (exit 2 at the CLI,
+`BrokerAddressError` in the import lane), never a fallback to 1883. Falling back
+would let a typo silently redirect traffic onto whatever already holds the
+default port — the accident the override exists to prevent, and precisely how
+the docker-backed integration suite keeps off the real stack's port.
+
 ## Who depends on this: the blocked-consumer chain
 
 The first consumer is real and its dependency is recorded on both sides, so this
