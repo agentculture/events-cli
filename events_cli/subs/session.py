@@ -59,9 +59,10 @@ from __future__ import annotations
 
 import logging
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from events_cli.address import default_broker_host, default_broker_port
 from events_cli.subs.errors import BrokerUnreachableError, SessionError
 
 __all__ = [
@@ -95,13 +96,12 @@ QOS_AT_LEAST_ONCE = 1
 #: hangs an agent turn.
 DEFAULT_CONNECT_TIMEOUT = 10.0
 
-_DEFAULT_HOST = "127.0.0.1"
-_DEFAULT_PORT = 1883
 _DEFAULT_KEEPALIVE = 60
 
 _BROKER_HINT = (
     "start the broker with 'events up', then check it with 'events status' "
-    "(the generated stack binds 127.0.0.1:1883)"
+    "(the generated stack binds 127.0.0.1:1883; EVENTS_BROKER_HOST / "
+    "EVENTS_BROKER_PORT point this process at a different one)"
 )
 
 
@@ -113,10 +113,19 @@ class BrokerAddress:
     publishes (``127.0.0.1:1883:1883``) — remote access is an explicit,
     documented opt-in that edits the template, and this default must not
     quietly widen it.
+
+    The default is *resolved*, not baked in: ``default_factory`` calls
+    :mod:`events_cli.address` at construction time, so ``EVENTS_BROKER_HOST`` /
+    ``EVENTS_BROKER_PORT`` are read when an address is built rather than when
+    this module is imported. That is what lets one process point a drain at a
+    second broker without editing anything, and it is the same resolver
+    :class:`events_cli.client.EventClient` uses — the two lanes cannot disagree
+    about where "the broker" is. Passing a host/port explicitly bypasses the
+    environment entirely.
     """
 
-    host: str = _DEFAULT_HOST
-    port: int = _DEFAULT_PORT
+    host: str = field(default_factory=default_broker_host)
+    port: int = field(default_factory=default_broker_port)
     keepalive: int = _DEFAULT_KEEPALIVE
 
 

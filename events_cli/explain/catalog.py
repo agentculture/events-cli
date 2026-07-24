@@ -86,6 +86,26 @@ store. See `events explain emit`, `events explain get` and
 - `2` environment / setup error
 - `3+` reserved
 
+## Environment
+
+Each of these has a default that makes the common case need no configuration;
+setting one is the escape hatch for a host running more than one of something.
+
+- `EVENTS_STACK_DIR` — where `events init` writes the generated stack
+  (default: `$XDG_CONFIG_HOME/events-cli/stack`). Per-invocation: `--dir`.
+- `EVENTS_HISTORY_DIR` — the history store, and the subscription registry
+  inside it (default: `$XDG_CONFIG_HOME/events-cli/history`).
+- `EVENTS_BROKER_HOST` / `EVENTS_BROKER_PORT` — which broker the verbs that
+  reach one connect to (default: `127.0.0.1:1883`, what `events up` publishes).
+  Applies to `sub add`, `sub remove`, `watch` and `emit`, and to a
+  default-constructed `EventClient` in the import lane, so a process can be
+  pointed at a second broker without editing anything. There is deliberately no
+  CLI flag: the address is a property of the host, not a per-call choice, and
+  remote access as a supported surface is issue #10's. A malformed
+  `EVENTS_BROKER_PORT` is a hard exit-2 error, never a silent fallback to 1883
+  — a typo must not quietly redirect traffic onto whatever holds the default
+  port.
+
 ## See also
 
 - `events explain whoami`
@@ -389,6 +409,11 @@ id) plus an MQTT persistent session in the broker, kept in step by
 - `2` a damaged registry record, or the broker refused/never answered
   (`sub add` and `sub remove` touch the broker; `sub list`/`sub show` do not).
 
+## Which broker
+
+`127.0.0.1:1883` — the one `events up` publishes — unless `EVENTS_BROKER_HOST`
+/ `EVENTS_BROKER_PORT` say otherwise. See `events explain events`.
+
 ## See also
 
 - `events explain watch`
@@ -517,6 +542,12 @@ instead.
 - `1` a bad name/bound, or no subscription by that name.
 - `2` the store is damaged, or the broker refused/never answered.
 
+## Which broker, which store
+
+The broker is `127.0.0.1:1883` unless `EVENTS_BROKER_HOST` /
+`EVENTS_BROKER_PORT` say otherwise; the store and registry live under
+`EVENTS_HISTORY_DIR`. See `events explain events`.
+
 ## See also
 
 - `events explain sub`
@@ -562,8 +593,15 @@ exists to close. See `events explain get`.
 - `0` the envelope validated and the broker accepted the publish.
 - `1` `--data` could not be read or parsed, or the assembled envelope failed
   validation (field-level errors in the message) — nothing was published.
-- `2` the envelope was valid but the broker refused or was unreachable. The
-  event, topic and failure reason are still printed to stdout.
+- `2` the envelope was valid but the broker refused or was unreachable, or
+  `EVENTS_BROKER_PORT` is not a port. The event, topic and failure reason are
+  still printed to stdout (nothing is printed when the address itself is bad —
+  no publish was attempted).
+
+## Which broker
+
+`127.0.0.1:1883` unless `EVENTS_BROKER_HOST` / `EVENTS_BROKER_PORT` say
+otherwise. See `events explain events`.
 
 ## See also
 

@@ -53,11 +53,21 @@ class _FakeEventClient:
         self.init_kwargs = kwargs
         self.calls: list[dict[str, object]] = []
         self.closed = False
+        # Connected from the outset, so `emit`'s bounded connection wait returns
+        # on its first check and no unit test pays a wall-clock delay. The
+        # never-connects case has its own test below, which pins the bound.
+        self.connected = True
         self.result = PublishResult(ok=True, connected=True, reason="ok", mid=1)
         _FakeEventClient.instances.append(self)
 
-    def publish_event(self, envelope, topic, *, qos=0, retain=False):
-        self.calls.append({"envelope": envelope, "topic": topic, "qos": qos, "retain": retain})
+    @property
+    def is_connected(self) -> bool:
+        return self.connected
+
+    def publish_event(self, envelope, topic, *, qos=0, retain=False, wait=0.0):
+        self.calls.append(
+            {"envelope": envelope, "topic": topic, "qos": qos, "retain": retain, "wait": wait}
+        )
         return self.result
 
     def close(self) -> None:
@@ -357,3 +367,104 @@ def test_emit_failed_publish_text_mode_shows_reason_and_no_traceback(
     assert "reason:" in out
     assert "no_conn" in out
     assert "Traceback" not in out
+
+
+# --- the one-shot publish waits: for the connection, and for the broker -----
+#
+# `EventClient` connects asynchronously, so a publish issued in the same breath
+# as the constructor is always issued while disconnected. Before this was fixed,
+# `events emit` reported `connected=false` / `no_conn` and exited 2 against a
+# perfectly healthy broker, EVERY time — and the message queued inside paho was
+# then discarded by the immediate `close()`. Nothing here could see it, because
+# every test above replaces `EventClient` with a fake that is born connected;
+# only the docker-backed round-trip in tests/test_subs_integration.py could.
+# These three tests are what stop it regressing without a broker in the room.
+
+
+class _LateClient(_FakeEventClient):
+    """Connects only after ``connect_after`` reads of ``is_connected``."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.connected = False
+        self.reads = 0
+        self.connect_after = 3
+        self.connected_at_publish: bool | None = None
+
+    @property
+    def is_connected(self) -> bool:
+        self.reads += 1
+        if self.reads >= self.connect_after:
+            self.connected = True
+        return self.connected
+
+    def publish_event(self, envelope, topic, *, qos=0, retain=False, wait=0.0):
+        self.connected_at_publish = self.connected
+        return super().publish_event(envelope, topic, qos=qos, retain=retain, wait=wait)
+
+
+def test_emit_waits_for_the_connection_before_publishing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The publish happens only once the client reports connected."""
+    monkeypatch.setattr(emit_module, "EventClient", _LateClient)
+
+    rc = main(["emit", "task.requested", "--json"])
+    capsys.readouterr()
+
+    assert rc == 0
+    client = _FakeEventClient.instances[-1]
+    assert client.connected_at_publish is True, (
+        "emit published while still disconnected — the message would be queued "
+        "inside paho and then dropped by close()"
+    )
+    assert client.reads >= client.connect_after
+    assert client.closed is True
+
+
+def test_emit_asks_the_broker_to_confirm_the_publish(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A positive ``wait`` is passed, so the process cannot exit before the bytes leave.
+
+    paho's own ``loop_stop`` docstring says stopping the loop does not guarantee
+    a queued PUBLISH was sent. A one-shot CLI therefore has to wait for the
+    confirmation; the hot lane (``publish``) still defaults to ``wait=0``.
+    """
+    monkeypatch.setattr(emit_module, "EventClient", _FakeEventClient)
+
+    rc = main(["emit", "task.requested", "--json"])
+    capsys.readouterr()
+
+    assert rc == 0
+    call = _FakeEventClient.instances[-1].calls[0]
+    assert call["qos"] == 1
+    assert isinstance(call["wait"], float) and call["wait"] > 0
+
+
+def test_emit_gives_up_waiting_for_a_connection_that_never_comes(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The connection wait is bounded — a dead broker must not hang the caller.
+
+    The bound is shrunk to milliseconds here rather than waited out: what is
+    under test is that ``_await_connection`` returns at its deadline and lets the
+    publish proceed to a normal exit-2 report, not how long the shipped bound is.
+    """
+
+    class _NeverConnects(_FakeEventClient):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(*args, **kwargs)
+            self.connected = False
+            self.result = PublishResult(ok=False, connected=False, reason="no_conn", mid=None)
+
+    monkeypatch.setattr(emit_module, "EventClient", _NeverConnects)
+    monkeypatch.setattr(emit_module, "_CONNECT_WAIT", 0.05)
+
+    rc = main(["emit", "task.requested", "--json"])
+
+    assert rc == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["publish"]["ok"] is False
+    assert payload["publish"]["reason"] == "no_conn"
+    assert _FakeEventClient.instances[-1].closed is True

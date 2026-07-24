@@ -33,9 +33,21 @@ Each test that needs a broker spins up its OWN, via :func:`broker_factory`:
   volume (``events-cli-it-data-<pid>-<rand>``) — never ``events-mosquitto`` /
   ``events-cli`` (the real stack's names) and never any ``nova-*`` name.
 * an **ephemeral loopback port** (``127.0.0.1:<free>:1883``) — never host 1883,
-  which on this box carries the live ``nova-mosquitto`` robot broker.
+  which on this box carries ``events-mosquitto``: the **production event broker
+  for a live robot**, and the container the real ``events up`` stack owns. (This
+  used to say ``nova-mosquitto``; the nova stack was deprecated and the live
+  broker on 1883 is now the events-cli one. Same rule, different name — and a
+  stronger reason for it, since the real stack's own names are now the ones a
+  careless test could collide with.)
 * force teardown (``docker rm -f`` + ``docker volume rm``) in the fixture
   finalizer, so a failed run leaves no orphan container or volume.
+
+The same factory serves the durable-subscription suite
+-------------------------------------------------------
+``tests/test_subs_integration.py`` imports :func:`broker_factory` from here
+rather than growing a second broker lifecycle. One place knows how to start,
+name, port, restart and reap a throwaway broker; ``tests/conftest.py`` holds the
+session-wide guard that the production broker was never restarted by any of it.
 
 Client tooling runs INSIDE the container
 -----------------------------------------
@@ -107,6 +119,23 @@ persistence_file mosquitto.db
 autosave_interval {autosave}
 log_dest stdout
 """
+
+
+def _conf_text(*, autosave: int, max_queued: int | None) -> str:
+    """The throwaway broker's config — the shipped template's shape, tuned per test.
+
+    ``max_queued_messages`` is omitted unless a test asks for it, which leaves
+    mosquitto's own default (1000) in force — the value the generated
+    ``mosquitto.conf`` restates explicitly. A test that needs to *reach* that
+    bound sets a far smaller one instead of publishing 1000+ messages to observe
+    a property that does not depend on the number; see
+    ``tests/test_subs_integration.py``'s overflow test for why that is the same
+    behaviour rather than a different one.
+    """
+    text = _CONF_TEMPLATE.format(autosave=autosave)
+    if max_queued is not None:
+        text += f"max_queued_messages {max_queued}\n"
+    return text
 
 
 # --- docker seam (tests only; bandit excludes tests/) ----------------------
@@ -247,6 +276,27 @@ class ThrowawayBroker:
         """
         return _docker("exec", self.container, *args, timeout=timeout)
 
+    def exec_input(
+        self, *args: str, stdin_text: str, timeout: float = 300
+    ) -> subprocess.CompletedProcess:
+        """Run a command inside the broker container with ``stdin_text`` on its stdin.
+
+        The one place this suite needs an *open* stdin, so it cannot go through
+        :func:`_docker`, which closes it deliberately. It exists to drive
+        ``mosquitto_pub -l``: one message per input line, every PUBACK waited for
+        before the process exits. That turns a bulk QoS-1 publish into a single
+        synchronous docker call rather than one call per message — the
+        difference between seconds and minutes for a queue-overflow test, and it
+        removes the "did the publish actually leave?" race entirely.
+        """
+        return subprocess.run(
+            ["docker", "exec", "-i", self.container, *args],
+            input=stdin_text,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+
     def stop_clean(self, timeout: float = _DOWN_TIMEOUT) -> None:
         """SIGTERM + grace, waited out: mosquitto flushes persistence on clean shutdown.
 
@@ -318,13 +368,17 @@ def _wait_connectable(broker: ThrowawayBroker, timeout: float = _READY_TIMEOUT) 
     )
 
 
-def _start_broker(image: str, *, autosave_interval: int) -> ThrowawayBroker:
+def _start_broker(
+    image: str, *, autosave_interval: int, max_queued_messages: int | None = None
+) -> ThrowawayBroker:
     token = f"{os.getpid()}-{secrets.token_hex(4)}"
     container = f"events-cli-it-{token}"
     volume = f"events-cli-it-data-{token}"
     conf_dir = Path(tempfile.mkdtemp(prefix="events-cli-it-"))
     conf = conf_dir / "mosquitto.conf"
-    conf.write_text(_CONF_TEMPLATE.format(autosave=autosave_interval), encoding="utf-8")
+    conf.write_text(
+        _conf_text(autosave=autosave_interval, max_queued=max_queued_messages), encoding="utf-8"
+    )
     # The broker runs as uid 1883 inside the container and must read the mounted
     # config; the mkdtemp default (0700) would hide it from that uid.
     os.chmod(conf_dir, 0o755)
@@ -397,8 +451,14 @@ def broker_factory():
     image = _require_stack_env()
     created: list[ThrowawayBroker] = []
 
-    def _make(*, autosave_interval: int = _LONG_AUTOSAVE) -> ThrowawayBroker:
-        broker = _start_broker(image, autosave_interval=autosave_interval)
+    def _make(
+        *, autosave_interval: int = _LONG_AUTOSAVE, max_queued_messages: int | None = None
+    ) -> ThrowawayBroker:
+        broker = _start_broker(
+            image,
+            autosave_interval=autosave_interval,
+            max_queued_messages=max_queued_messages,
+        )
         created.append(broker)
         return broker
 
