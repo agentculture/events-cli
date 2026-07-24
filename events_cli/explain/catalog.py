@@ -37,10 +37,11 @@ is `events_cli`.
 The **broker stack** is implemented: `init`/`up`/`status`/`logs`/`down` generate
 and operate a Dockerised Mosquitto deployment. **Durable subscriptions and the
 bounded cursor drain** are also implemented: `sub add/list/show/remove` and
-`watch`. Publishing an event through the CLI (`events emit`) and reading
-captured history directly (`events get` / `events list`) are not implemented
-yet, and neither are pipelines. The specification being built against lives in
-the repository's open issues.
+`watch`. **The direct history-read surface** is implemented too: `events emit`
+validates an envelope through the core and publishes it QoS 1 to its canonical
+topic, and `events get` / `events list` read captured history back. Pipelines
+are not implemented yet. The specification being built against lives in the
+repository's open issues.
 
 ## Verbs
 
@@ -57,6 +58,9 @@ the repository's open issues.
 - `events down` — stop and remove the broker.
 - `events sub add/list/show/remove` — manage durable subscriptions.
 - `events watch <name>` — bounded cursor drain over a durable subscription.
+- `events emit <type>` — validate an envelope, then publish it QoS 1.
+- `events get <event-id>` — read one captured event back from the store.
+- `events list` — the most recently captured events, optionally by type.
 
 ## The broker
 
@@ -69,9 +73,11 @@ volume. See `events explain init`.
 `events sub` registers a named subscription (an MQTT persistent session plus a
 registry record); `events watch` bounded-drains it, replaying already-persisted
 history before touching the broker for anything newer. See `events explain sub`
-and `events explain watch`. Publishing an event (`events emit`) and reading
-captured history directly (`events get` / `events list`) are not implemented
-yet.
+and `events explain watch`. `events emit` publishes an event (through the same
+core envelope and canonical topic mapping); `events get` / `events list` read
+whatever a registered subscription's drain actually captured back from the
+store. See `events explain emit`, `events explain get` and
+`events explain list`.
 
 ## Exit-code policy
 
@@ -514,6 +520,115 @@ instead.
 ## See also
 
 - `events explain sub`
+- `events explain get`
+"""
+
+_EMIT = """\
+# events emit <type>
+
+Validates an envelope through the core, then publishes it QoS 1 to its
+canonical topic via `EventClient`. Rejects an invalid envelope with
+field-level errors and publishes nothing.
+
+## Usage
+
+    events emit task.requested --data task.json
+    events emit heartbeat --data -              # read the data payload from stdin
+    events emit task.requested --data task.json --correlation-id run-42
+    events emit task.requested --json
+
+## The `--data` shape
+
+`--data` is the event's `data` payload only — a path to a JSON file, or `-` for
+stdin — never a whole envelope. `id` and `time` are always generated here;
+`type` is the positional, `source` defaults to this agent's own
+`agent://<culture.yaml nick>` and can be overridden. Absent `--data`, the
+payload is `{}`.
+
+## Tracing flags
+
+`--correlation-id` / `--causation-id` / `--run-id` set the envelope's
+correlation fields, so a pipeline of related events can be tied together at
+emit time.
+
+## QoS is always 1
+
+Never a flag: publishing at QoS 0 is never queued for an offline persistent
+session, so it silently bypasses durable capture — the exact trap this verb
+exists to close. See `events explain get`.
+
+## Exit codes
+
+- `0` the envelope validated and the broker accepted the publish.
+- `1` `--data` could not be read or parsed, or the assembled envelope failed
+  validation (field-level errors in the message) — nothing was published.
+- `2` the envelope was valid but the broker refused or was unreachable. The
+  event, topic and failure reason are still printed to stdout.
+
+## See also
+
+- `events explain get`
+- `events explain list`
+"""
+
+_GET = """\
+# events get <event-id>
+
+Reads one captured event back from the history store, by its `id`. Read-only:
+no broker connection, a file read only — this verb needs no MQTT client
+installed at all.
+
+## Usage
+
+    events get evt_01J...
+    events get evt_01J... --json
+
+## What "captured" means
+
+Only events a **registered subscription's** persistent session actually
+queued are ever in the store — an event published before any subscription
+existed, or at QoS 0, was never captured regardless of this verb. See
+`events explain watch` for the capture boundary and `docs/contract.md`.
+
+## Exit codes
+
+- `0` found.
+- `1` no captured event with that id.
+- `2` the store on disk is damaged.
+
+## See also
+
+- `events explain list`
+- `events explain emit`
+"""
+
+_LIST = """\
+# events list
+
+Lists the most recently captured events, newest first, optionally filtered by
+type. Read-only: no broker connection, a file read only. An event captured by
+several subscriptions is reported once.
+
+## Usage
+
+    events list
+    events list --type task.requested
+    events list --max 20 --json
+
+## Defaults
+
+`--max 100`. Finite by policy: there is no unbounded list.
+
+## Exit codes
+
+- `0` success (an empty list is still success).
+- `1` `--max` was not a positive integer.
+- `2` the store on disk is damaged.
+
+## See also
+
+- `events explain get`
+- `events explain emit`
 """
 
 
@@ -545,4 +660,9 @@ ENTRIES: dict[tuple[str, ...], str] = {
     ("sub", "show"): _SUB_SHOW,
     ("sub", "remove"): _SUB_REMOVE,
     ("watch",): _WATCH,
+    # The direct history-read surface: publish through the CLI, read captured
+    # history back.
+    ("emit",): _EMIT,
+    ("get",): _GET,
+    ("list",): _LIST,
 }

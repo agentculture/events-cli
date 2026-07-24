@@ -334,7 +334,13 @@ class EventClient:
         ``payload`` may be an :class:`Envelope` (sent as its JSON wire form), a
         mapping (sent as JSON), or raw ``str``/``bytes``. ``retain=True`` marks
         the message as the topic's last-known value; ``qos`` defaults to 0
-        (at-most-once, drop-don't-block).
+        (at-most-once, drop-don't-block) — right for this raw, co-located lane,
+        and deliberately unchanged (see :meth:`publish_event` for the lane
+        whose default changed). **A QoS 0 publish is never queued for an
+        offline persistent session at all**, regardless of whether a
+        subscription exists for the topic — it bypasses durable capture
+        (:mod:`events_cli.history`) entirely, by construction. Pass ``qos=1``
+        whenever a published message must survive being captured by a drain.
         """
         connected = self.is_connected
         try:
@@ -352,13 +358,26 @@ class EventClient:
         )
 
     def publish_event(
-        self, envelope: Envelope, topic: str, *, qos: int = 0, retain: bool = False
+        self, envelope: Envelope, topic: str, *, qos: int = 1, retain: bool = False
     ) -> PublishResult:
         """Publish an :class:`Envelope` as its canonical JSON wire form. Never raises.
 
         A typed convenience over :meth:`publish` that makes the topic explicit;
         the consumer owns its topic tree (e.g. ``reachy/events/{source}/{type}``)
         rather than having the client invent one.
+
+        ``qos`` defaults to **1**, not 0 — a behaviour change from before
+        0.10.0 (see ``CHANGELOG.md``). A QoS 0 publish is never queued for an
+        offline persistent session at all, so it silently bypasses durable
+        capture (:mod:`events_cli.history`, the store ``events watch`` drains
+        into) regardless of whether a subscription exists — the exact trap
+        this default now closes for the envelope-publishing lane. ``events
+        emit`` (``events_cli/cli/_commands/emit.py``) always passes ``qos=1``
+        explicitly rather than relying on this default, and it is the only
+        thing changing here: :meth:`publish` — the raw lane
+        ``reachy-mini-cli``'s 50 Hz control loop binds to — still defaults to
+        ``qos=0`` and is deliberately unaffected. Pass ``qos=0`` explicitly if
+        an envelope publish genuinely does not need durable capture.
         """
         return self.publish(topic, envelope, qos=qos, retain=retain)
 

@@ -101,6 +101,12 @@ def test_retained_and_qos_reach_paho(dead_port: int, monkeypatch: pytest.MonkeyP
 def test_publish_event_serialises_the_envelope_wire_form(
     dead_port: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Proves the wire-form serialisation only.
+
+    ``qos`` is passed explicitly here so this test keeps passing regardless of
+    ``publish_event``'s own default; the default itself is pinned separately
+    below (``test_publish_event_defaults_to_qos_1``).
+    """
     import paho.mqtt.client as mqtt
 
     env = Envelope.new("head.moved", "app://reachy-mini-cli", data={"angle": 12})
@@ -112,11 +118,59 @@ def test_publish_event_serialises_the_envelope_wire_form(
 
     with EventClient("127.0.0.1", dead_port) as client:
         monkeypatch.setattr(client._paho, "publish", spy)
-        client.publish_event(env, "reachy/events/head/moved")
+        client.publish_event(env, "reachy/events/head/moved", qos=0)
     assert seen["topic"] == "reachy/events/head/moved"
     assert seen["payload"] == env.to_json()
     assert seen["qos"] == 0
     assert seen["retain"] is False
+
+
+# --- the qos=1 behaviour change (q3): publish_event only, publish untouched --
+
+
+def test_publish_event_defaults_to_qos_1(dead_port: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The q3 behaviour change: ``publish_event`` now defaults to qos=1.
+
+    An envelope published at QoS 0 is never queued for an offline persistent
+    session at all, so it silently bypasses durable capture — the exact trap
+    this default now closes. Regression test for the flip; see
+    ``CHANGELOG.md`` (0.10.0, Changed) and the ``publish_event`` docstring.
+    """
+    import paho.mqtt.client as mqtt
+
+    env = Envelope.new("task.requested", "agent://builder", data={})
+    seen: dict = {}
+
+    def spy(topic, payload=None, qos=0, retain=False, properties=None):
+        seen.update(qos=qos)
+        return mqtt.MQTTMessageInfo(1)
+
+    with EventClient("127.0.0.1", dead_port) as client:
+        monkeypatch.setattr(client._paho, "publish", spy)
+        client.publish_event(env, "events/task/requested")  # no qos kwarg: the default
+    assert seen["qos"] == 1
+
+
+def test_publish_still_defaults_to_qos_0(dead_port: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The raw lane (``reachy-mini-cli``'s 50 Hz control loop) is unaffected by q3.
+
+    Only ``publish_event`` (the envelope lane) changed its default; the plain
+    ``publish`` a co-located producer calls directly must keep defaulting to
+    qos=0 (drop-don't-block), or a real-time loop could start blocking on
+    acknowledgements it never asked for.
+    """
+    import paho.mqtt.client as mqtt
+
+    seen: dict = {}
+
+    def spy(topic, payload=None, qos=0, retain=False, properties=None):
+        seen.update(qos=qos)
+        return mqtt.MQTTMessageInfo(1)
+
+    with EventClient("127.0.0.1", dead_port) as client:
+        monkeypatch.setattr(client._paho, "publish", spy)
+        client.publish("reachy/events/head/moved", "{}")  # no qos kwarg: the default
+    assert seen["qos"] == 0
 
 
 # --- Last Will / availability ----------------------------------------------
