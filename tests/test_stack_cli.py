@@ -14,6 +14,7 @@ is a separate, marked suite.
 from __future__ import annotations
 
 import json
+import shlex
 from pathlib import Path
 from typing import Sequence
 
@@ -422,6 +423,27 @@ def test_status_accepts_ndjson_and_array_ps_output(
     assert json.loads(capsys.readouterr().out)["healthy"] is True
 
 
+# --- the reproduce-it-yourself remediation string ---------------------------
+
+
+def test_failure_remediation_is_a_command_you_can_actually_paste() -> None:
+    """`CommandResult.display` must survive an argv element needing quoting.
+
+    It is handed to the operator as copy-paste remediation (stack.py's
+    "reproduce it directly with:"), so a stack directory containing a space
+    must not render a command that silently means something else.
+    """
+    result = CommandResult(
+        argv=("docker", "compose", "-f", "/home/My Stack/compose.yaml", "up"),
+        returncode=1,
+        stdout="",
+        stderr="boom",
+    )
+    assert "'/home/My Stack/compose.yaml'" in result.display
+    # The naive " ".join would produce a 6-word command; quoting keeps it 5.
+    assert shlex.split(result.display) == list(result.argv)
+
+
 # --- logs and down ----------------------------------------------------------
 
 
@@ -443,6 +465,23 @@ def test_logs_tail_flag_reaches_compose(
     capsys.readouterr()
     assert main(["logs", "--dir", str(stack), "--tail", "5"]) == 0
     assert docker.argv_for("logs")[-1] == "5"
+
+
+def test_logs_bounds_duration_as_well_as_output(
+    stack: Path, docker: FakeDocker, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--tail` caps how much comes back; `--timeout` caps how long we wait.
+
+    Bounding output alone is not enough: on a loaded host `docker compose logs`
+    can be slow to answer even a small tail, and an agent turn hangs on the
+    wait, not on the byte count.
+    """
+    capsys.readouterr()
+    assert main(["logs", "--dir", str(stack)]) == 0
+    assert docker.kwargs[-1]["timeout"] == 30, "default must be finite"
+
+    assert main(["logs", "--dir", str(stack), "--timeout", "5"]) == 0
+    assert docker.kwargs[-1]["timeout"] == 5, "--timeout must reach the runner"
 
 
 def test_logs_json_returns_lines(

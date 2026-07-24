@@ -5,11 +5,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this project is
 
 `events-cli` is the AgentCulture **event fabric**: an agent and CLI that runs and
-maintains a Dockerised Eclipse Mosquitto MQTT broker and fronts it through
-[`agentfront`](https://github.com/agentculture/agentfront) as a CLI, an HTTP API
-and an MCP surface — so any app can `import events_cli`, any service can call
-the API, and an agent or a human can publish and subscribe to events the same
-way.
+maintains a Dockerised Eclipse Mosquitto MQTT broker, so an app can
+`import events_cli` and an agent or a human can publish and subscribe to events
+the same way.
+
+**Today that means two surfaces — the CLI and the import package.** Fronting
+the broker through [`agentfront`](https://github.com/agentculture/agentfront) to
+*also* derive an HTTP API and an MCP surface is the project's intent and the
+shape the contract is designed for, but it is **not built** — it is a deferred
+arc, tracked as [#6](https://github.com/agentculture/events-cli/issues/6). Read
+the intended end state under [Roadmap](#roadmap) and
+[Design constraints](#design-constraints-decide-these-before-the-data-plane);
+it is deliberately not described here as something that exists.
 
 **Design principle (from [#1](https://github.com/agentculture/events-cli/issues/1)):**
 *Mosquitto transports events. `events-cli` defines what they mean.* Consumers

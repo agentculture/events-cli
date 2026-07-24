@@ -292,7 +292,12 @@ Prints the last N lines of the broker's container log.
 
     events logs
     events logs --tail 500
+    events logs --timeout 60
     events logs --json
+
+Two bounds, and both matter. `--tail` caps how much comes back; `--timeout`
+caps how long you wait for it, because on a loaded host docker can be slow to
+answer even a small tail. Bounding output alone still lets a turn hang.
 
 There is deliberately no `--follow`. An unbounded stream blocks whatever is
 reading it, which for an agent means a hung turn; every agent-facing verb here

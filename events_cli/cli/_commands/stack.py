@@ -310,7 +310,7 @@ def cmd_logs(args: argparse.Namespace) -> int:
 
     tail = int(args.tail)
     argv = compose_argv(directory, "logs", "--no-color", "--tail", str(tail))
-    result = _execute(argv, timeout=_QUERY_TIMEOUT)
+    result = _execute(argv, timeout=int(args.timeout))
     if not result.ok:
         raise _failure(result, "docker compose logs")
 
@@ -398,6 +398,17 @@ def register(sub: argparse._SubParsersAction) -> None:
         metavar="N",
         help="Number of trailing log lines (default: 100). There is no --follow: "
         "an unbounded stream hangs an agent turn.",
+    )
+    # Two bounds, not one: --tail caps how MUCH comes back, --timeout caps how
+    # LONG the caller waits for it. On a contended host `docker compose logs`
+    # can be slow to answer even for a small tail, so bounding output alone
+    # still leaves an agent turn able to hang.
+    logs.add_argument(
+        "--timeout",
+        type=int,
+        default=_QUERY_TIMEOUT,
+        metavar="SECONDS",
+        help=f"Seconds to allow for docker to return the log (default: {_QUERY_TIMEOUT}).",
     )
     logs.set_defaults(func=cmd_logs)
 

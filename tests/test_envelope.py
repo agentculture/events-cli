@@ -474,6 +474,22 @@ def test_invalid_schema_versions_are_rejected(value: object, code: str) -> None:
     assert errors_for(wire(schemaVersion=value)) == {"schemaVersion": code}
 
 
+@pytest.mark.parametrize("value", ["٣", "1.٣", "੩"])
+def test_non_ascii_digits_are_not_a_schema_version(value: str) -> None:
+    """The version is ASCII digits only — Unicode decimal digits are rejected.
+
+    This pins a deliberate choice against a static-analysis suggestion to write
+    the validator as ``\\d``. In Python ``\\d`` matches every Unicode decimal
+    digit, so ``\\d`` would accept U+0663 ARABIC-INDIC DIGIT THREE — and
+    ``int()`` parses it to 3, so such a value would validate *and* parse here
+    while being something no other consumer's JSON parser would accept as a
+    number. Wire formats are ASCII; keep this test if the pattern is ever
+    rewritten.
+    """
+    assert int(value.replace(".", "") or "0") >= 0  # the trap: Python does parse these
+    assert errors_for(wire(schemaVersion=value)) == {"schemaVersion": "malformed"}
+
+
 @pytest.mark.parametrize("field_name", ["correlationId", "causationId", "runId", "producer"])
 @pytest.mark.parametrize("value,code", [(7, "not_a_string"), ("", "empty"), ("a b", "malformed")])
 def test_invalid_optional_identifiers_are_rejected(

@@ -16,6 +16,7 @@ docker dependency: nothing in ``tests/`` executes a container.
 from __future__ import annotations
 
 import json
+import shlex
 import shutil
 import subprocess  # nosec B404 - fixed argv lists, shell=False; see module docstring
 from dataclasses import dataclass
@@ -51,8 +52,13 @@ class CommandResult:
 
     @property
     def display(self) -> str:
-        """The command as a human would retype it. Diagnostics only."""
-        return " ".join(self.argv)
+        """The command as a human would retype it. Diagnostics only.
+
+        ``shlex.join``, not ``" ".join``: this string is handed to the operator
+        as copy-paste remediation, and a stack directory containing a space
+        would otherwise render a command that silently means something else.
+        """
+        return shlex.join(self.argv)
 
 
 #: A runner takes an argv list and a timeout and returns a :class:`CommandResult`.
