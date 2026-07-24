@@ -13,4 +13,4 @@ culture_server_yaml: ~/.culture/server.yaml
 sibling_projects:
   - ../guildmaster
   - ../steward
-  - ../teken
+  - ../agentfront
