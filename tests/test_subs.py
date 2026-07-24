@@ -382,8 +382,9 @@ def test_the_registry_survives_a_new_handle_on_the_same_root(tmp_path: Path) -> 
 
 def test_a_duplicate_name_is_refused(registry: SubscriptionRegistry) -> None:
     registry.add(SubscriptionRecord.new("robot", "task.*"))
+    duplicate = SubscriptionRecord.new("robot", "scope.*")
     with pytest.raises(DuplicateSubscriptionError) as excinfo:
-        registry.add(SubscriptionRecord.new("robot", "scope.*"))
+        registry.add(duplicate)
     assert excinfo.value.remediation
 
 
@@ -688,8 +689,9 @@ def test_sub_remove_force_deletes_the_record_with_the_broker_down(
 
 
 def test_sub_remove_reports_an_unknown_subscription(registry: SubscriptionRegistry) -> None:
+    factory = fake_factory()
     with pytest.raises(UnknownSubscriptionError):
-        remove_subscription("robot", registry=registry, client_factory=fake_factory())
+        remove_subscription("robot", registry=registry, client_factory=factory)
 
 
 def test_list_subscriptions_reads_the_registry(registry: SubscriptionRegistry) -> None:
@@ -910,8 +912,9 @@ def test_opening_a_session_without_paho_names_the_missing_package(
 
     for name in ("paho", "paho.mqtt", "paho.mqtt.client"):
         monkeypatch.setitem(sys.modules, name, None)
+    session = PersistentSession("events-cli-sub-robot")
     with pytest.raises(MqttDependencyError) as excinfo:
-        PersistentSession("events-cli-sub-robot").open()
+        session.open()
     assert "paho-mqtt" in str(excinfo.value)
 
 

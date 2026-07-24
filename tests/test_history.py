@@ -587,15 +587,17 @@ def test_an_empty_store_lists_nothing(store: HistoryStore) -> None:
 def test_a_subscription_name_that_could_escape_the_store_is_rejected(
     store: HistoryStore, name: str
 ) -> None:
+    envelope = event(1)
     with pytest.raises(InvalidSubscriptionError):
-        store.append(event(1), name)
+        store.append(envelope, name)
     with pytest.raises(InvalidSubscriptionError):
         store.read(name)
 
 
 def test_a_rejected_subscription_name_creates_nothing_on_disk(store: HistoryStore) -> None:
+    envelope = event(1)
     with pytest.raises(InvalidSubscriptionError):
-        store.append(event(1), "../escape")
+        store.append(envelope, "../escape")
     assert not (store.root.parent / "escape").exists()
 
 
@@ -901,8 +903,9 @@ def test_a_backend_is_recognised_structurally() -> None:
 def test_the_facade_validates_before_the_backend_sees_anything(tmp_path: Path) -> None:
     backend = RecordingBackend(tmp_path)
     store = HistoryStore(backend=backend)
+    envelope = event(1)
     with pytest.raises(InvalidSubscriptionError):
-        store.append(event(1), "../escape")
+        store.append(envelope, "../escape")
     with pytest.raises(HistoryError):
         store.read("builder", since=0, max=0)
     assert backend.calls == []
