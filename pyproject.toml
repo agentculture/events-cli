@@ -13,7 +13,9 @@ classifiers = [
     "Topic :: Software Development",
     "Intended Audience :: Developers",
 ]
-dependencies = []
+dependencies = [
+    "paho-mqtt>=2,<3",
+]
 
 [project.urls]
 Homepage = "https://github.com/agentculture/events-cli"
@@ -75,4 +77,13 @@ skips = ["B101", "B404", "B603"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra"
+# The default selection excludes the marked suites: `perf` carries the only
+# wall-clock timing assertion (the enqueue-latency bound) and `stack` needs a
+# live broker/docker. CI runs this default selection, so neither a loaded runner
+# nor a missing broker can make the quality gate flaky. Run them explicitly with
+# `pytest -m perf` / `pytest -m stack`.
+addopts = "-ra -m 'not perf and not stack'"
+markers = [
+    "perf: wall-clock performance assertion (e.g. enqueue latency); excluded by default",
+    "stack: needs a live broker or docker stack; excluded by default",
+]
