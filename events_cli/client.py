@@ -189,6 +189,34 @@ def _rc_reason(rc: Any) -> str:
     return str(rc)
 
 
+def _validate_client_config(
+    host: str,
+    port: int,
+    keepalive: int,
+    will: Will | None,
+    availability_topic: str | None,
+) -> None:
+    """Reject nonsensical constructor config before any paho object exists.
+
+    Split out of :meth:`EventClient.__init__` so the constructor's cognitive
+    complexity stays low — this is pure validation, called exactly once, with
+    the same checks and messages that used to live inline. Runtime broker
+    state never reaches this function; it only catches genuine programmer
+    error at construction time.
+    """
+    if not isinstance(host, str) or not host:
+        raise ValueError("host must be a non-empty string")
+    if isinstance(port, bool) or not isinstance(port, int) or not 0 < port < 65536:
+        raise ValueError("port must be an integer in 1..65535")
+    if isinstance(keepalive, bool) or not isinstance(keepalive, int) or keepalive <= 0:
+        raise ValueError("keepalive must be a positive integer (seconds)")
+    if will is not None and availability_topic is not None:
+        raise ValueError(
+            "pass either 'will' or 'availability_topic', not both — "
+            "availability_topic builds its own Last Will"
+        )
+
+
 class EventClient:
     """An importable, thread-safe MQTT publish client that never raises at runtime.
 
@@ -234,17 +262,7 @@ class EventClient:
 
         # -- config validation: genuine programmer error raises here, before any
         #    paho object exists. Runtime broker state never reaches this branch.
-        if not isinstance(host, str) or not host:
-            raise ValueError("host must be a non-empty string")
-        if isinstance(port, bool) or not isinstance(port, int) or not 0 < port < 65536:
-            raise ValueError("port must be an integer in 1..65535")
-        if isinstance(keepalive, bool) or not isinstance(keepalive, int) or keepalive <= 0:
-            raise ValueError("keepalive must be a positive integer (seconds)")
-        if will is not None and availability_topic is not None:
-            raise ValueError(
-                "pass either 'will' or 'availability_topic', not both — "
-                "availability_topic builds its own Last Will"
-            )
+        _validate_client_config(host, port, keepalive, will, availability_topic)
 
         self._host = host
         self._port = port

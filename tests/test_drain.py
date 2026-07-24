@@ -421,8 +421,9 @@ def test_an_event_the_store_refuses_is_never_acknowledged(
         deliveries=(message(first, 1), message(poison, 2)),
     )
 
+    journal_store = JournalStore(store, journal, fail_on=poison.id)
     with pytest.raises(DrainError):
-        drain(registry, JournalStore(store, journal, fail_on=poison.id), factory, max=5)
+        drain(registry, journal_store, factory, max=5)
 
     assert factory.made[0].acks == [(1, QOS_AT_LEAST_ONCE)]
     assert journal == [f"persist:{first.id}", "ack:1"]
@@ -433,9 +434,10 @@ def test_a_store_failure_still_closes_the_session(
 ) -> None:
     poison = event(1)
     factory = fake_drain_factory(session_present=True, deliveries=(message(poison, 1),))
+    journal_store = JournalStore(store, [], fail_on=poison.id)
 
     with pytest.raises(DrainError):
-        drain(registry, JournalStore(store, [], fail_on=poison.id), factory)
+        drain(registry, journal_store, factory)
 
     assert factory.made[0].sequence[-2:] == ["disconnect", "loop_stop"]
 
@@ -448,9 +450,10 @@ def test_what_was_persisted_before_a_store_failure_survives_it(
     factory = fake_drain_factory(
         session_present=True, deliveries=(message(first, 1), message(poison, 2))
     )
+    journal_store = JournalStore(store, [], fail_on=poison.id)
 
     with pytest.raises(DrainError):
-        drain(registry, JournalStore(store, [], fail_on=poison.id), factory)
+        drain(registry, journal_store, factory)
 
     page = store.read(SUB, 0, 10)
     assert [record.envelope.id for record in page.records] == [first.id]
@@ -603,8 +606,9 @@ def test_an_unbounded_or_nonsensical_drain_cannot_be_requested(
 def test_broken_bounds_are_reported_in_one_pass(
     registry: SubscriptionRegistry, store: HistoryStore
 ) -> None:
+    factory = fake_drain_factory()
     with pytest.raises(SubscriptionValidationError) as excinfo:
-        drain(registry, store, fake_drain_factory(), max=0, timeout=0, since=-1)
+        drain(registry, store, factory, max=0, timeout=0, since=-1)
 
     assert set(excinfo.value.fields) == {"max", "timeout", "since"}
     assert {err.code for err in excinfo.value.errors} <= set(ERROR_CODES)
@@ -712,9 +716,10 @@ def test_a_store_that_cannot_read_back_what_it_just_wrote_is_a_named_error(
     registry: SubscriptionRegistry, store: HistoryStore
 ) -> None:
     factory = fake_drain_factory(session_present=True, deliveries=(message(event(1), 1),))
+    journal_store = JournalStore(store, [], blind=True)
 
     with pytest.raises(DrainError) as excinfo:
-        drain(registry, JournalStore(store, [], blind=True), factory, max=1)
+        drain(registry, journal_store, factory, max=1)
 
     assert excinfo.value.remediation
 
@@ -735,9 +740,10 @@ def test_a_store_whose_read_path_is_broken_is_a_named_error_not_a_traceback(
     back because the fault is in the *store*.
     """
     factory = fake_drain_factory(session_present=True, deliveries=(message(event(1), 1),))
+    journal_store = JournalStore(store, [], unreadable=True)
 
     with pytest.raises(DrainError) as excinfo:
-        drain(registry, JournalStore(store, [], unreadable=True), factory, max=1)
+        drain(registry, journal_store, factory, max=1)
 
     assert "read back" in str(excinfo.value)
     assert factory.made[0].acks == []
@@ -907,8 +913,9 @@ def test_a_broker_that_is_not_there_is_a_named_error(
 def test_a_refused_session_is_a_named_error(
     registry: SubscriptionRegistry, store: HistoryStore
 ) -> None:
+    factory = fake_drain_factory(refuse=True)
     with pytest.raises(SessionError):
-        drain(registry, store, fake_drain_factory(refuse=True))
+        drain(registry, store, factory)
 
 
 def test_draining_an_unregistered_subscription_is_a_named_error(
