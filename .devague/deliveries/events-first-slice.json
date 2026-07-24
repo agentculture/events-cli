@@ -1,0 +1,21 @@
+{
+  "plan_slug": "events-first-slice",
+  "schema_version": 1,
+  "created": "2026-07-24T04:29:51Z",
+  "updated": "2026-07-24T04:29:51Z",
+  "deviations": [
+    {
+      "id": "d1",
+      "what": "Pinned eclipse-mosquitto:2.1.2, not a 2.0.x \u2014 the floating eclipse-mosquitto:2 tag now resolves to 2.1.2, and 2.1 ships an unauthenticated http_api dashboard on 9883 by DEFAULT. The generated mosquitto.conf therefore replaces the image's bundled config wholesale to suppress 9883, rather than relying on the 2.0 upstream defaults the spec assumed. allow_anonymous=false and localhost-only-with-no-listener still hold in 2.1.2 (verified locally), so the loopback+anonymous-on-loopback posture is unchanged; only the 'rely on defaults' premise for the dashboard changed to 'actively suppress'.",
+      "task_ref": "t5",
+      "reason": "The spec's Mosquitto-facts section and honesty h4 named eclipse-mosquitto:2 and 'Mosquitto 2.0 already defaults the way #1 wants'; verified on the box that :2 is 2.1.2 with a new default exposure (9883). The security outcome the spec wanted (nothing off-loopback, no anonymous LAN access) is preserved, but via explicit config not default-reliance.",
+      "affects": [
+        "c4",
+        "c27"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "classification": "acceptable"
+    }
+  ]
+}
