@@ -21,3 +21,9 @@ ignores:
   - ".agentfront/**"
   # Vendored skills are cited verbatim from guildmaster — do not reformat them.
   - ".claude/skills/**"
+  # Installed dependencies ship their own markdown; CI lints after `uv sync`,
+  # so without this the gate would grade third-party docs.
+  - ".venv/**"
+  # devague working state (reviews, questions) is gitignored and never reaches
+  # a fresh checkout — linting it only fails locally.
+  - ".devague/**"
