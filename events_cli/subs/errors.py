@@ -12,13 +12,15 @@ implements, recorded here so the translation is not invented at the boundary:
 =====================================  ====  ========================================
 error                                  exit  meaning
 =====================================  ====  ========================================
-:class:`SubscriptionValidationError`   1     the caller's name or pattern is invalid
+:class:`SubscriptionValidationError`   1     the caller's name, pattern or bound is
+                                             invalid
 :class:`DuplicateSubscriptionError`    1     that name is already registered
 :class:`UnknownSubscriptionError`      1     no subscription by that name
 :class:`RegistryCorruptError`          2     the registry on disk is damaged
 :class:`RegistryFormatError`           2     a record was written by a newer build
 :class:`SessionError`                  2     the broker refused or dropped us
 :class:`BrokerUnreachableError`        2     the broker is not there at all
+:class:`DrainError`                    2     the drain could not store what it read
 =====================================  ====  ========================================
 
 Exit 1 is "you asked for the wrong thing"; exit 2 is "the environment is not in
@@ -36,6 +38,7 @@ from events_cli.core.errors import EventsError, FieldError
 
 __all__ = [
     "BrokerUnreachableError",
+    "DrainError",
     "DuplicateSubscriptionError",
     "RegistryCorruptError",
     "RegistryFormatError",
@@ -154,4 +157,22 @@ class BrokerUnreachableError(SessionError):
     Split from its parent because it is the one failure with an obvious next
     command (``events up``), and because it is the failure a co-located agent
     hits most: the stack simply is not running yet.
+    """
+
+
+class DrainError(SubsError):
+    """A drain could not persist (or read back) what the broker delivered.
+
+    An *environment* fault — a full disk, a damaged history store — so exit 2,
+    not exit 1: nothing the caller passed caused it and no retry with different
+    arguments fixes it. It always wraps the underlying
+    :class:`~events_cli.history.HistoryError` (``raise ... from``), because the
+    drain's contract is that every way a drain can fail is a
+    :class:`SubsError`, and the CLI verb should need exactly one ``except``.
+
+    Raising it **stops the drain**, and it is raised only after the offending
+    message has been left *unacknowledged*: the broker still owns that message
+    and will redeliver it. Whatever the drain persisted and acknowledged before
+    the failure is durably in the store — the batch is lost to the caller, the
+    events are not, and ``HistoryStore.read`` returns them.
     """

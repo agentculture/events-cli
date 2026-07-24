@@ -25,14 +25,21 @@ the record in place rather than orphaning a live queue with nothing left on
 disk pointing at it. ``force=True`` is the deliberate escape hatch for a broker
 that is gone for good.
 
+The third half is the drain
+---------------------------
+:mod:`events_cli.subs.drain` consumes from a session: it resumes the same
+client id, **persists each event to the history store before acknowledging
+it**, stops at a bounded ``max``/``timeout``, and returns the batch plus the
+store's cursor. That ordering is the module's whole reason for existing — see
+its docstring — and it is what makes an MQTT session takeover lossless rather
+than merely loud.
+
 What this package is not
 ------------------------
-It does not drain. Consuming from a session, persisting to the history store
-before acknowledging, and returning a cursor are t8's
-(:mod:`events_cli.history` holds the store side), and the CLI verbs are t9's.
-Nothing here imports :mod:`events_cli.cli`: four surfaces consume this registry
-and only one of them has exit codes, so this layer raises
-:class:`SubsError` and the CLI translates at its edge.
+It does not expose CLI verbs; those are t9's. Nothing here imports
+:mod:`events_cli.cli`: four surfaces consume this registry and only one of them
+has exit codes, so this layer raises :class:`SubsError` and the CLI translates
+at its edge.
 
 Nothing here imports paho at module scope either — see
 :mod:`events_cli.subs.session` — so importing this package, building records
@@ -41,8 +48,18 @@ and listing the registry all work from a checkout with nothing installed.
 
 from __future__ import annotations
 
+from events_cli.subs.drain import (
+    DEFAULT_DRAIN_MAX,
+    DEFAULT_DRAIN_TIMEOUT,
+    STOPPED_MAX,
+    STOPPED_TIMEOUT,
+    DrainResult,
+    SkippedMessage,
+    drain_subscription,
+)
 from events_cli.subs.errors import (
     BrokerUnreachableError,
+    DrainError,
     DuplicateSubscriptionError,
     RegistryCorruptError,
     RegistryFormatError,
@@ -81,21 +98,28 @@ from events_cli.subs.session import (
 __all__ = [
     "CLIENT_ID_PREFIX",
     "DEFAULT_CONNECT_TIMEOUT",
+    "DEFAULT_DRAIN_MAX",
+    "DEFAULT_DRAIN_TIMEOUT",
     "MAX_NAME_LENGTH",
     "QOS_AT_LEAST_ONCE",
     "REGISTRY_DIRNAME",
     "REGISTRY_FORMAT_VERSION",
     "SESSION_EXPIRY_DESTROY",
     "SESSION_EXPIRY_INFINITE",
+    "STOPPED_MAX",
+    "STOPPED_TIMEOUT",
     "SUPPORTED_REGISTRY_FORMATS",
     "BrokerAddress",
     "BrokerUnreachableError",
     "ClientFactory",
+    "DrainError",
+    "DrainResult",
     "DuplicateSubscriptionError",
     "PersistentSession",
     "RegistryCorruptError",
     "RegistryFormatError",
     "SessionError",
+    "SkippedMessage",
     "SubsError",
     "SubscriptionRecord",
     "SubscriptionRegistry",
@@ -106,6 +130,7 @@ __all__ = [
     "client_id_for",
     "default_client_factory",
     "default_registry_dir",
+    "drain_subscription",
     "get_subscription",
     "list_subscriptions",
     "open_registry",
