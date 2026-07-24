@@ -7,70 +7,26 @@ package version. Read-only; touches nothing but its own ``culture.yaml``.
 The nick is the mesh suffix (``events-cli``), deliberately distinct from the
 console command (``events``). Identity is read from ``culture.yaml``, so it
 tracks that file with no code change.
+
+The hand-rolled ``culture.yaml`` line scanner this verb is built on lives in
+:mod:`events_cli.core.identity` and is re-exported here, unchanged, under the
+names it has always had. It moved when the subscription registry needed the
+same answer for a subscription's default *owner*: one scanner, so the identity
+``events whoami`` prints and the identity a subscription records can never
+disagree. It is still hand-rolled rather than PyYAML, and
+:mod:`events_cli.core` is still stdlib-only, so the introspection lane keeps
+running from a bare checkout.
 """
 
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
 from events_cli import __version__
 from events_cli.cli._output import emit_result
+from events_cli.core.identity import find_culture_yaml, read_agent_fields
 
-_FALLBACK_NICK = "events-cli"
-
-
-def find_culture_yaml() -> Path | None:
-    """Locate this agent's own ``culture.yaml`` by walking up from this module.
-
-    The identity must be the agent's own, not whatever ``culture.yaml`` happens
-    to sit in the caller's current working directory. In an editable / source
-    install, walking up from ``__file__`` finds the repo root; in a wheel
-    install no ``culture.yaml`` ships alongside the package and the caller falls
-    back to the literal defaults.
-    """
-    here = Path(__file__).resolve()
-    for parent in here.parents:
-        candidate = parent / "culture.yaml"
-        if candidate.is_file():
-            return candidate
-    return None
-
-
-def read_agent_fields() -> dict[str, str]:
-    """Return ``suffix``/``backend``/``model`` from the first agent block.
-
-    Parsed without a YAML dependency to keep the runtime deps empty. Reads
-    top-level ``key: value`` lines within the first agent entry; anything
-    fancier than the documented shape falls back to the defaults below.
-    """
-    fields = {"nick": _FALLBACK_NICK, "backend": "unknown", "model": "unknown"}
-    cfg = find_culture_yaml()
-    if cfg is None:
-        return fields
-    try:
-        text = cfg.read_text(encoding="utf-8")
-    except OSError:
-        return fields
-    seen_agent = False
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith(("- suffix:", "suffix:")):
-            if seen_agent:  # second agent block — stop at the first
-                break
-            seen_agent = True
-            fields["nick"] = _scalar(stripped, "suffix")
-        elif seen_agent and stripped.startswith("backend:"):
-            fields["backend"] = _scalar(stripped, "backend")
-        elif seen_agent and stripped.startswith("model:"):
-            fields["model"] = _scalar(stripped, "model")
-    return fields
-
-
-def _scalar(line: str, key: str) -> str:
-    """Extract the scalar after ``key:`` from a ``culture.yaml`` line."""
-    _, _, value = line.partition(f"{key}:")
-    return value.strip().strip("'\"") or "unknown"
+__all__ = ["cmd_whoami", "find_culture_yaml", "read_agent_fields", "register", "report"]
 
 
 def report() -> dict[str, object]:
