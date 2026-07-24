@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-07-24
+
+### Added
+
+- **Envelope core** (`events_cli/core/`) — an immutable, CloudEvents-compatible `Envelope` with `id`/`type`/`source`/`time`/`schemaVersion`/`data` plus tracing fields (`correlationId`, `causationId`, `runId`, `traceparent`, `producer`, `deliveryAttempt`). Standard library only: no transport, no Docker, no I/O. `from_dict`/`from_json` is the trust boundary and reports **every** problem as a field-level `FieldError` in one pass. Deliberately stricter than CloudEvents — unknown top-level keys rejected, numeric `schemaVersion`, lowercase-dotted `type`, absolute-URI `source`.
+- **Importable publish client** (`events_cli.EventClient`) — the producer lane for co-located latency-sensitive publishers. `publish()` is an O(1) enqueue on the caller's thread and never raises into the caller; a broker-down publish returns `PublishResult(ok=False)`. Supports retained messages, Last Will and Testament, QoS 0/1, and a per-process-unique client id that avoids MQTT session takeover between co-located producers.
+- **Stack verbs** `events init/up/status/logs/down` — generate and operate a Dockerised Mosquitto broker. Loopback-only by construction (`127.0.0.1:1883:1883`), an exact image pin, `persistence true` plus a mounted `events-data` volume, and a preflight that refuses to double-bind port 1883 when a foreign broker holds it.
+- **Consumer contract** (`docs/contract.md`) — the event contract, the mesh lane boundary against `culture`, and the at-least-once/dedupe-on-id requirement.
+- **Docker-backed integration suite** behind a `stack` marker plus an `EVENTS_STACK_IT` opt-in, including a measured unclean-kill persistence bound and a registry probe that fails if the pinned image tag is not published.
+- **Runnable issue-#3 acceptance checklist** (`scripts/acceptance-issue-3.sh`) covering all five criteria against a live broker, and the executed live-run record in `docs/acceptance/`.
+- **Nova migration runbook** (`docs/migrations/`) with an executed forward/rollback rehearsal.
+
+### Changed
+
+- `paho-mqtt >=2,<3` is now a **base dependency** — `pip install events-cli` pulls it. The previous `dependencies = []` posture is given up deliberately; what preserves the no-install introspection lane is a lazy-import boundary (paho is imported only inside `client.py`, only when a client is constructed), not an empty dependency list.
+- Dev dependency and CI rubric gate migrated from `teken` to `agentfront>=0.20`, resolving the repo's only tracked drift entry (closes #5).
+- `CLAUDE.md` trued up to the repo as built — it previously stated that nothing MQTT, Docker or envelope-related existed.
+- Default pytest selection now excludes the `perf` and `stack` markers, so the coverage/Sonar gate never depends on a live broker or wall-clock timing.
+
+### Fixed
+
+- **Broker image pin corrected to `eclipse-mosquitto:2.1.2-alpine`.** The previously pinned `eclipse-mosquitto:2.1.2` is a tag upstream has never published — a pull fails with `no such manifest`, so `events up` would have failed on any clean host while passing every dockerless test and every run on a cache-warm machine. The version had been read from the local image's `org.opencontainers.image.version` label, which reports the software version rather than a tag name. Verified that `eclipse-mosquitto:2` and `eclipse-mosquitto:2.1.2-alpine` resolve to an identical manifest digest, so the corrected pin freezes exactly what the floating tag serves today (deviation d2).
+
 ## [0.8.0] - 2026-07-24
 
 ### Added
