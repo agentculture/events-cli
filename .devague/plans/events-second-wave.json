@@ -5,7 +5,7 @@
   "schema_version": 3,
   "status": "exported",
   "created": "2026-07-24T15:33:56Z",
-  "updated": "2026-07-24T15:38:54Z",
+  "updated": "2026-07-24T16:01:54Z",
   "targets": [
     {
       "id": "c1",
@@ -186,6 +186,76 @@
       "id": "h18",
       "kind": "honesty",
       "text": "The arc's PRs add no agentfront-binding, pipeline, dynsec or SSE code; the deferred issues stay open with their contracts intact; the arc's diff contains no surface from #6/#8/#10"
+    },
+    {
+      "id": "c23",
+      "kind": "requirement",
+      "text": "The stack-marked integration suite runs against an isolated scratch stack \u2014 its own compose project/container name, host port, volume and stack dir (EVENTS_STACK_DIR override) \u2014 and never restarts the production events-mosquitto, which serves the robot's nervous system live on this box; applying the template change (max_queued_messages) to the spark-f8a9 broker is a documented service window with rollback, like the first slice's cutover"
+    },
+    {
+      "id": "h19",
+      "kind": "honesty",
+      "text": "The integration suite's setup provably targets its own compose project name, port and volume (asserted in the tests themselves), events-mosquitto's uptime is unbroken by a full suite run, and the live template rollout is recorded as a service window with a rehearsed rollback in docs/acceptance/"
+    },
+    {
+      "id": "c24",
+      "kind": "boundary",
+      "text": "History captures only what a registered subscription's persistent session queued: events emitted before any subscription exists, or published at QoS 0, are transported but never captured \u2014 there is no global capture until #8's control service; docs/contract.md states this so no consumer assumes 'events list' is a complete log"
+    },
+    {
+      "id": "h20",
+      "kind": "honesty",
+      "text": "docs/contract.md states the capture boundary in its own section, and a stack test proves an event published before 'sub add' is absent from a later drain while one published after is present"
+    },
+    {
+      "id": "c25",
+      "kind": "requirement",
+      "text": "Backlog overflow semantics are documented from evidence, not assumption: mosquitto 2.1.2's default bound is 1000 queued messages per offline session and overflow drops the NEWEST messages silently (probe: 1200 published offline, exactly m00000-m00999 delivered in order; one broker log notice) \u2014 the template sets max_queued_messages explicitly, contract.md documents drop-newest, and the watch/drain docs point at 'events logs' for the drop notice"
+    },
+    {
+      "id": "h21",
+      "kind": "honesty",
+      "text": "A stack test publishes bound+K messages to an offline subscription and proves exactly 'bound' oldest messages arrive in order; the template carries max_queued_messages with a comment stating drop-newest; contract.md documents it"
+    },
+    {
+      "id": "c26",
+      "kind": "requirement",
+      "text": "Concurrent drains of one subscription are MQTT session takeover (the broker kicks the first drainer; observed and logged by the probe): persist-then-ack plus store dedupe on event id makes takeover lose nothing, and contract.md documents single-drainer-per-subscription semantics"
+    },
+    {
+      "id": "h22",
+      "kind": "honesty",
+      "text": "A stack test starts drain A, starts drain B on the same subscription, and proves the store holds every event exactly once afterwards; contract.md documents single-drainer semantics"
+    },
+    {
+      "id": "c27",
+      "kind": "requirement",
+      "text": "Durable capture requires QoS 1 publishes and the docs must say so: EventClient.publish AND publish_event default to qos=0, so an importable-client producer publishing envelopes with defaults silently bypasses durable capture \u2014 'events emit' publishes qos=1 explicitly, and the client docstrings + contract.md state that QoS 0 bypasses capture"
+    },
+    {
+      "id": "h23",
+      "kind": "honesty",
+      "text": "'events emit' passes qos=1 explicitly (unit-asserted); client.py docstrings and contract.md both state that QoS 0 publishes bypass durable capture"
+    },
+    {
+      "id": "c28",
+      "kind": "requirement",
+      "text": "The history store is per-host like the stack itself: it lives beside the stack state (default_stack_dir's XDG convention, honouring an env override), never CWD-relative \u2014 'events list' answers the same from any directory \u2014 and every stored record carries a store-format version marker so a future migration has something to key on"
+    },
+    {
+      "id": "h24",
+      "kind": "honesty",
+      "text": "'events list' returns identical results from two different CWDs against the same host stack (test); stored records carry the format-version field from the first write"
+    },
+    {
+      "id": "c29",
+      "kind": "requirement",
+      "text": "Subscription names and patterns are validated at the boundary: names are slugs, patterns use the dotted-type grammar with '*' only, and raw MQTT filter characters (#, +, /) are rejected with a field-level error \u2014 a pattern can never escape the events/ topic prefix"
+    },
+    {
+      "id": "h25",
+      "kind": "honesty",
+      "text": "Unit tests reject '#', 'a/+', 'a/b', '../x' and empty patterns with field-level errors, dockerless; the compiled filter is always prefixed events/"
     }
   ],
   "tasks": [
@@ -269,14 +339,17 @@
       "status": "confirmed",
       "acceptance_criteria": [
         "events_cli/history/ exposes append(envelope, sub)->seq, read(sub, since, max), get(id), list(type, max) behind a backend seam implementing t5's verdict; the sequence is store-assigned and monotonic per subscription; append dedupes on envelope id",
-        "A test mints two envelope ids in the same millisecond and proves read order equals append order and cursor resume is exact \u2014 no ordering derived from ULID comparison; all tests dockerless"
+        "A test mints two envelope ids in the same millisecond and proves read order equals append order and cursor resume is exact \u2014 no ordering derived from ULID comparison; all tests dockerless",
+        "The store lives beside the per-host stack state (never CWD-relative; env-overridable) and every record carries a store-format version field; 'events list' returns identical results from two different CWDs against the same host stack (test)"
       ],
       "deps": [
         "t5"
       ],
       "covers": [
         "c5",
-        "h9"
+        "h9",
+        "c28",
+        "h24"
       ],
       "instruction": ""
     },
@@ -287,7 +360,8 @@
       "status": "confirmed",
       "acceptance_criteria": [
         "Subscription records carry name, pattern, owner (default culture.yaml nick, fallback client id), created; 'events sub list --json' shows owner; the record schema needs no migration when #10 adds dynsec (identity name == owner name)",
-        "sub add establishes an MQTT persistent session (clean_start=false, QoS 1 subscribe on the compiled filter, session expiry set to the documented value) and disconnects leaving the session live in the broker; sub remove destroys the session; paho stays lazily imported; lifecycle unit-tested against a fake client, dockerless"
+        "sub add establishes an MQTT persistent session (clean_start=false, QoS 1 subscribe on the compiled filter, session expiry set to the documented value) and disconnects leaving the session live in the broker; sub remove destroys the session; paho stays lazily imported; lifecycle unit-tested against a fake client, dockerless",
+        "Subscription names must be slugs and patterns must match the dotted-type grammar ('*' only): '#', '+', '/', '..' and empty are rejected with field-level errors (dockerless tests); compiled filters are always events/-prefixed"
       ],
       "deps": [
         "t4",
@@ -296,7 +370,9 @@
       "covers": [
         "c17",
         "c21",
-        "h6"
+        "h6",
+        "c29",
+        "h25"
       ],
       "instruction": ""
     },
@@ -340,13 +416,15 @@
       "origin": "llm",
       "status": "confirmed",
       "acceptance_criteria": [
-        "emit <type> --data <file|-> validates via the core envelope (generated id/time) and publishes QoS 1 to the canonical topic via EventClient, rejecting an invalid envelope with field-level errors before any publish; get <event-id> and list --type --max read drained history from the store; all three carry catalog entries and --json"
+        "emit <type> --data <file|-> validates via the core envelope (generated id/time) and publishes QoS 1 to the canonical topic via EventClient, rejecting an invalid envelope with field-level errors before any publish; get <event-id> and list --type --max read drained history from the store; all three carry catalog entries and --json",
+        "EventClient.publish_event defaults to qos=1 (behaviour change per resolved q3: CHANGELOG-noted, regression-tested; reachy's publish() raw lane unaffected); 'events emit' asserts qos=1; client docstrings state QoS 0 bypasses durable capture"
       ],
       "deps": [
         "t9"
       ],
       "covers": [
-        "c19"
+        "c19",
+        "c27"
       ],
       "instruction": ""
     },
@@ -357,14 +435,19 @@
       "status": "confirmed",
       "acceptance_criteria": [
         "The generated mosquitto.conf sets max_queued_messages explicitly with a comment stating the undrained-backlog bound; template tests updated; events init --force regenerates cleanly",
-        "docs/contract.md documents the consume side: the canonical topic mapping, the backlog bound, cursor-drain semantics, and the built/not-built table rows flip for sub/watch/emit/get/list in the same PR that adds them"
+        "docs/contract.md documents the consume side: the canonical topic mapping, the backlog bound, cursor-drain semantics, and the built/not-built table rows flip for sub/watch/emit/get/list in the same PR that adds them",
+        "docs/contract.md gains the capture-boundary section (registered-subscription QoS-1 traffic only; no global log until #8), documents drop-newest overflow at the explicit max_queued_messages bound with the 'events logs' notice pointer, and single-drainer/takeover semantics"
       ],
       "deps": [
         "t4"
       ],
       "covers": [
         "c10",
-        "h2"
+        "h2",
+        "c24",
+        "h20",
+        "c25",
+        "h23"
       ],
       "instruction": ""
     },
@@ -375,7 +458,8 @@
       "status": "confirmed",
       "acceptance_criteria": [
         "Stack-marked tests prove: publish N envelopes with no drainer, docker restart of the broker, then drain returns all N in order; a drain returns within --timeout with at most --max events plus a cursor and resuming re-delivers nothing acknowledged; two CLI processes complete an emit-to-watch round-trip; a reachy/* publish is not captured by a contract-lane subscription",
-        "The default pytest selection still passes on a machine with no docker and no broker"
+        "The default pytest selection still passes on a machine with no docker and no broker",
+        "The suite asserts its own isolation (own compose project/port/volume/stack dir; events-mosquitto uptime unbroken by a full run); an overflow test proves exactly-bound oldest-first delivery; a takeover test proves the store holds every event exactly once after concurrent drains; a capture-boundary test proves pre-registration events are absent from drains"
       ],
       "deps": [
         "t9",
@@ -387,7 +471,11 @@
         "h3",
         "h4",
         "c14",
-        "h15"
+        "h15",
+        "c23",
+        "h21",
+        "c26",
+        "h22"
       ],
       "instruction": ""
     },
@@ -398,7 +486,8 @@
       "status": "confirmed",
       "acceptance_criteria": [
         "scripts/acceptance-second-wave.sh exits non-zero on any failing check and covers every success-signal item; the live run on spark-f8a9 is recorded in docs/acceptance/ with observable output per item",
-        "The record captures the before-state evidence (no consume verbs or store code at pre-arc HEAD) and marks #6/#8/#9/#10 deferred with issue links \u2014 the wave claim stays arc-by-arc honest"
+        "The record captures the before-state evidence (no consume verbs or store code at pre-arc HEAD) and marks #6/#8/#9/#10 deferred with issue links \u2014 the wave claim stays arc-by-arc honest",
+        "The live template rollout on spark-f8a9 is a recorded service window with a rehearsed rollback in docs/acceptance/, following the first slice's cutover discipline"
       ],
       "deps": [
         "t12"
@@ -411,7 +500,8 @@
         "c15",
         "h16",
         "c16",
-        "h17"
+        "h17",
+        "h19"
       ],
       "instruction": ""
     },

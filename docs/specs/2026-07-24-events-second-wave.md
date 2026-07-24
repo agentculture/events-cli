@@ -34,6 +34,18 @@
   - honesty: The type-to-topic and pattern-to-filter mapping is pure and tested dockerless in both directions; docs/contract.md documents it; and a test proves reachy/* topics are not captured by contract-lane subscription patterns
 - Every subscription records an owner identity as a declared name (default resolved from culture.yaml nick, falling back to the client id) — unauthenticated on loopback in this arc, forward-compatible with #10's dynsec so identity-owned subscriptions gain real authentication without a schema change
   - honesty: Every subscription record carries its owner; 'events sub list --json' shows it; and the record schema needs no migration when #10 lands (the dynsec identity name is the owner name)
+- The stack-marked integration suite runs against an isolated scratch stack — its own compose project/container name, host port, volume and stack dir (EVENTS_STACK_DIR override) — and never restarts the production events-mosquitto, which serves the robot's nervous system live on this box; applying the template change (max_queued_messages) to the spark-f8a9 broker is a documented service window with rollback, like the first slice's cutover
+  - honesty: The integration suite's setup provably targets its own compose project name, port and volume (asserted in the tests themselves), events-mosquitto's uptime is unbroken by a full suite run, and the live template rollout is recorded as a service window with a rehearsed rollback in docs/acceptance/
+- Backlog overflow semantics are documented from evidence, not assumption: mosquitto 2.1.2's default bound is 1000 queued messages per offline session and overflow drops the NEWEST messages silently (probe: 1200 published offline, exactly m00000-m00999 delivered in order; one broker log notice) — the template sets max_queued_messages explicitly, contract.md documents drop-newest, and the watch/drain docs point at 'events logs' for the drop notice
+  - honesty: A stack test publishes bound+K messages to an offline subscription and proves exactly 'bound' oldest messages arrive in order; the template carries max_queued_messages with a comment stating drop-newest; contract.md documents it
+- Concurrent drains of one subscription are MQTT session takeover (the broker kicks the first drainer; observed and logged by the probe): persist-then-ack plus store dedupe on event id makes takeover lose nothing, and contract.md documents single-drainer-per-subscription semantics
+  - honesty: A stack test starts drain A, starts drain B on the same subscription, and proves the store holds every event exactly once afterwards; contract.md documents single-drainer semantics
+- Durable capture requires QoS 1 publishes and the docs must say so: EventClient.publish AND publish_event default to qos=0, so an importable-client producer publishing envelopes with defaults silently bypasses durable capture — 'events emit' publishes qos=1 explicitly, and the client docstrings + contract.md state that QoS 0 bypasses capture
+  - honesty: 'events emit' passes qos=1 explicitly (unit-asserted); client.py docstrings and contract.md both state that QoS 0 publishes bypass durable capture
+- The history store is per-host like the stack itself: it lives beside the stack state (default_stack_dir's XDG convention, honouring an env override), never CWD-relative — 'events list' answers the same from any directory — and every stored record carries a store-format version marker so a future migration has something to key on
+  - honesty: 'events list' returns identical results from two different CWDs against the same host stack (test); stored records carry the format-version field from the first write
+- Subscription names and patterns are validated at the boundary: names are slugs, patterns use the dotted-type grammar with '*' only, and raw MQTT filter characters (#, +, /) are rejected with a field-level error — a pattern can never escape the events/ topic prefix
+  - honesty: Unit tests reject '#', 'a/+', 'a/b', '../x' and empty patterns with field-level errors, dockerless; the compiled filter is always prefixed events/
 
 ## Honesty conditions
 
@@ -45,6 +57,7 @@
 - The before-state is evidence, not narrative: at the pre-arc HEAD, events_cli contains no subscribe/consume/store code and no watch/emit/get/list/sub verb exists in the parser or the explain catalog
 - The success signal runs as an executable script or marked test on spark-f8a9 with observable output per item, exiting non-zero on any failure — a gate, not a demo, like scripts/acceptance-issue-3.sh
 - The arc's PRs add no agentfront-binding, pipeline, dynsec or SSE code; the deferred issues stay open with their contracts intact; the arc's diff contains no surface from #6/#8/#10
+- docs/contract.md states the capture boundary in its own section, and a stack test proves an event published before 'sub add' is absent from a later drain while one published after is present
 
 ## Success signals
 
@@ -55,6 +68,7 @@
 - The stable CLI contract survives every arc of the wave: _output.py stdout/stderr split and _errors.py exit codes stay frozen, the explain catalog keeps BOTH ('events',) and ('events-cli',) root keys, no traceback ever reaches stderr, and every new verb (watch, pipeline, dynsec-facing) goes through register(sub) plus a catalog entry with non-infinite --max/--timeout defaults — the rubric gate and pinned tests are the enforcement
 - docs/contract.md's 'What is built, and what is not' table is updated in the same PR as each arc that lands — it is currently honest (watch/pipeline verbs absent, dynsec listed 'not built — #10'), and keeping it honest is part of each arc's definition of done, not a trailing docs task
 - This arc delivers #7 plus the riders (the #3 reply/close and the pyproject description fix) only: no agentfront MCP/HTTP (#6), no pipelines (#8), no shell-cli migration (#9 — its evaluation verdict is recorded on the issue separately), no dynsec (#10), no SSE/websocket streaming — each deferred arc lands per its own issue contract, mirroring the first-slice precedent
+- History captures only what a registered subscription's persistent session queued: events emitted before any subscription exists, or published at QoS 0, are transported but never captured — there is no global capture until #8's control service; docs/contract.md states this so no consumer assumes 'events list' is a complete log
 
 ## Non-goals
 
@@ -88,6 +102,22 @@
   - seeds: `c9`, `c10`
 - `s10` — `docs/specs/2026-07-23-events-first-slice.md (Decisions + deferred requirement rows)`: the exported spec carries the deferred arcs as requirement rows with instruction+honesty conditions (agentfront binding, watch-as-cursor-drain) and freezes the CLI contract as a boundary — the second wave inherits these rows as its baseline; #1's non-goals are restated there as holding for every arc
   - seeds: `c9`, `c11`
+- `s11` — `challenge pass / cheap-probe: scratch mosquitto 2.1.2-alpine on 127.0.0.1:18831 with the repo template`: persistent session (clean_start=false, MQTT5 session-expiry 0xFFFFFFFF) reports session_present=true after a broker restart with zero extra broker config — the architecture's core premise holds; default queue bound is exactly 1000 with silent drop-NEWEST overflow, delivery in order, one broker log notice; probe container removed after
+  - seeds: `c25`
+- `s12` — `challenge pass / concurrency lens: probe broker log (session takeover on same-client-id reconnect)`: mosquitto logs 'disconnected: session taken over' — concurrent drains of one subscription kick the first drainer; persist-then-ack + id dedupe makes it lose nothing but the semantics must be documented and pinned by a test
+  - seeds: `c26`
+- `s13` — `challenge pass / hidden-dependencies lens: events_cli/client.py publish + publish_event signatures`: both default qos=0 (drop-don't-block, right for reachy) — but QoS 0 is never queued for offline sessions, so envelope publishers using defaults silently bypass durable capture; emit must pass qos=1 and the trap must be documented; whether publish_event's default flips is q3
+  - seeds: `c27`
+- `s14` — `challenge pass / operations lens: docker ps on spark-f8a9 + docs/acceptance/2026-07-24-issue-3-live-run.md`: events-mosquitto serves the robot's nervous system in production on this box right now; the first slice ran cutovers as timed service windows with a rehearsed rollback — the integration suite and the template rollout must follow the same discipline, which the spec previously never said
+  - seeds: `c23`
+- `s15` — `challenge pass / lifecycle lens: events_cli/stack/__init__.py default_stack_dir`: the stack is per-host by design (XDG config + EVENTS_STACK_DIR override, 'one broker per host is the deployment model') — the spec never said where the history store lives; a CWD-relative store would make 'events list' answer differently per directory, so the store must follow the stack's per-host convention
+  - seeds: `c28`
+- `s16` — `challenge pass / unstated-assumptions lens: MQTT session/QoS semantics vs the spec's history claims`: the spec reads as if history is a property of the fabric; it is a property of REGISTERED subscriptions — pre-registration and QoS 0 events are never captured, and no global capture exists until #8's control service; stated now as a boundary so consumers cannot assume a complete log
+  - seeds: `c24`
+- `s17` — `challenge pass / cheap-probe: paho v2 API introspection (manual_ack, clean_start, MQTT5 properties)`: paho 2.x exposes manual_ack at the constructor plus manual_ack_set/ack, clean_start on connect, and MQTT5 CONNECT properties — plan risk r2 settles positively; the persist-then-ack drain design is implementable as specified
+- `s18` — `challenge pass / security lens: sub add input surface (name -> client id, pattern -> topic filter)`: user-supplied names/patterns become MQTT client ids and topic filters — unvalidated, a pattern containing #, + or / could subscribe beyond the events/ prefix; seeded the boundary-validation requirement; no other injection surface found in the arc's verbs
+  - seeds: `c29`
+- `s19` — `challenge pass / reversibility+observability lens: template rollout and drain-side loss visibility`: rollback for the template change exists via the previous release's events init --force plus restart (first-slice precedent); overflow loss is visible only in the broker log (one notice line) — surfaced via the c25 documentation requirement; residual: a drainer still cannot detect a gap in-band, accepted as a documented limit of this arc (control-service capture at #8 removes it)
 
 ## Open / follow-up
 

@@ -39,18 +39,20 @@ slug: `events-second-wave` · status: `exported` · from frame: `events-second-w
 ### t6 — History store seam with store-assigned per-subscription cursor
 
 - depends on: t5
-- covers: c5, h9
+- covers: c5, h9, c28, h24
 - acceptance:
   - events_cli/history/ exposes append(envelope, sub)->seq, read(sub, since, max), get(id), list(type, max) behind a backend seam implementing t5's verdict; the sequence is store-assigned and monotonic per subscription; append dedupes on envelope id
   - A test mints two envelope ids in the same millisecond and proves read order equals append order and cursor resume is exact — no ordering derived from ULID comparison; all tests dockerless
+  - The store lives beside the per-host stack state (never CWD-relative; env-overridable) and every record carries a store-format version field; 'events list' returns identical results from two different CWDs against the same host stack (test)
 
 ### t7 — Subscription registry and MQTT persistent-session lifecycle
 
 - depends on: t4, t6
-- covers: c17, c21, h6
+- covers: c17, c21, h6, c29, h25
 - acceptance:
   - Subscription records carry name, pattern, owner (default culture.yaml nick, fallback client id), created; 'events sub list --json' shows owner; the record schema needs no migration when #10 adds dynsec (identity name == owner name)
   - sub add establishes an MQTT persistent session (clean_start=false, QoS 1 subscribe on the compiled filter, session expiry set to the documented value) and disconnects leaving the session live in the broker; sub remove destroys the session; paho stays lazily imported; lifecycle unit-tested against a fake client, dockerless
+  - Subscription names must be slugs and patterns must match the dotted-type grammar ('*' only): '#', '+', '/', '..' and empty are rejected with field-level errors (dockerless tests); compiled filters are always events/-prefixed
 
 ### t8 — Drain engine: resume, consume bounded, persist-then-ack, return cursor
 
@@ -70,33 +72,37 @@ slug: `events-second-wave` · status: `exported` · from frame: `events-second-w
 ### t10 — CLI verbs: events emit, events get, events list
 
 - depends on: t9
-- covers: c19
+- covers: c19, c27
 - acceptance:
   - emit <type> --data <file|-> validates via the core envelope (generated id/time) and publishes QoS 1 to the canonical topic via EventClient, rejecting an invalid envelope with field-level errors before any publish; get <event-id> and list --type --max read drained history from the store; all three carry catalog entries and --json
+  - EventClient.publish_event defaults to qos=1 (behaviour change per resolved q3: CHANGELOG-noted, regression-tested; reachy's publish() raw lane unaffected); 'events emit' asserts qos=1; client docstrings state QoS 0 bypasses durable capture
 
 ### t11 — Template and contract docs: backlog bound and the consume side
 
 - depends on: t4
-- covers: c10, h2
+- covers: c10, h2, c24, h20, c25, h23
 - acceptance:
   - The generated mosquitto.conf sets max_queued_messages explicitly with a comment stating the undrained-backlog bound; template tests updated; events init --force regenerates cleanly
   - docs/contract.md documents the consume side: the canonical topic mapping, the backlog bound, cursor-drain semantics, and the built/not-built table rows flip for sub/watch/emit/get/list in the same PR that adds them
+  - docs/contract.md gains the capture-boundary section (registered-subscription QoS-1 traffic only; no global log until #8), documents drop-newest overflow at the explicit max_queued_messages bound with the 'events logs' notice pointer, and single-drainer/takeover semantics
 
 ### t12 — Stack-marked integration suite for the persistent-session architecture
 
 - depends on: t9, t10, t11
-- covers: h2, h3, h4, c14, h15
+- covers: h2, h3, h4, c14, h15, c23, h21, c26, h22
 - acceptance:
   - Stack-marked tests prove: publish N envelopes with no drainer, docker restart of the broker, then drain returns all N in order; a drain returns within --timeout with at most --max events plus a cursor and resuming re-delivers nothing acknowledged; two CLI processes complete an emit-to-watch round-trip; a reachy/* publish is not captured by a contract-lane subscription
   - The default pytest selection still passes on a machine with no docker and no broker
+  - The suite asserts its own isolation (own compose project/port/volume/stack dir; events-mosquitto uptime unbroken by a full run); an overflow test proves exactly-bound oldest-first delivery; a takeover test proves the store holds every event exactly once after concurrent drains; a capture-boundary test proves pre-registration events are absent from drains
 
 ### t13 — Acceptance gate script and live run on spark-f8a9
 
 - depends on: t12
-- covers: c1, h1, c13, h14, c15, h16, c16, h17
+- covers: c1, h1, c13, h14, c15, h16, c16, h17, h19
 - acceptance:
   - scripts/acceptance-second-wave.sh exits non-zero on any failing check and covers every success-signal item; the live run on spark-f8a9 is recorded in docs/acceptance/ with observable output per item
   - The record captures the before-state evidence (no consume verbs or store code at pre-arc HEAD) and marks #6/#8/#9/#10 deferred with issue links — the wave claim stays arc-by-arc honest
+  - The live template rollout on spark-f8a9 is a recorded service window with a rehearsed rollback in docs/acceptance/, following the first slice's cutover discipline
 
 ### t14 — Deferred-arc hygiene ledger at arc close
 

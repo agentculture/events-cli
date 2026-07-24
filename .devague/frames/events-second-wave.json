@@ -4,7 +4,7 @@
   "schema_version": 3,
   "status": "exported",
   "created": "2026-07-24T14:42:29Z",
-  "updated": "2026-07-24T15:31:48Z",
+  "updated": "2026-07-24T16:01:24Z",
   "claims": [
     {
       "id": "c1",
@@ -373,6 +373,132 @@
       "hard_questions": [],
       "links": [],
       "instruction": ""
+    },
+    {
+      "id": "c23",
+      "kind": "requirement",
+      "text": "The stack-marked integration suite runs against an isolated scratch stack \u2014 its own compose project/container name, host port, volume and stack dir (EVENTS_STACK_DIR override) \u2014 and never restarts the production events-mosquitto, which serves the robot's nervous system live on this box; applying the template change (max_queued_messages) to the spark-f8a9 broker is a documented service window with rollback, like the first slice's cutover",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h19",
+          "text": "The integration suite's setup provably targets its own compose project name, port and volume (asserted in the tests themselves), events-mosquitto's uptime is unbroken by a full suite run, and the live template rollout is recorded as a service window with a rehearsed rollback in docs/acceptance/",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c24",
+      "kind": "boundary",
+      "text": "History captures only what a registered subscription's persistent session queued: events emitted before any subscription exists, or published at QoS 0, are transported but never captured \u2014 there is no global capture until #8's control service; docs/contract.md states this so no consumer assumes 'events list' is a complete log",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h20",
+          "text": "docs/contract.md states the capture boundary in its own section, and a stack test proves an event published before 'sub add' is absent from a later drain while one published after is present",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c25",
+      "kind": "requirement",
+      "text": "Backlog overflow semantics are documented from evidence, not assumption: mosquitto 2.1.2's default bound is 1000 queued messages per offline session and overflow drops the NEWEST messages silently (probe: 1200 published offline, exactly m00000-m00999 delivered in order; one broker log notice) \u2014 the template sets max_queued_messages explicitly, contract.md documents drop-newest, and the watch/drain docs point at 'events logs' for the drop notice",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h21",
+          "text": "A stack test publishes bound+K messages to an offline subscription and proves exactly 'bound' oldest messages arrive in order; the template carries max_queued_messages with a comment stating drop-newest; contract.md documents it",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c26",
+      "kind": "requirement",
+      "text": "Concurrent drains of one subscription are MQTT session takeover (the broker kicks the first drainer; observed and logged by the probe): persist-then-ack plus store dedupe on event id makes takeover lose nothing, and contract.md documents single-drainer-per-subscription semantics",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h22",
+          "text": "A stack test starts drain A, starts drain B on the same subscription, and proves the store holds every event exactly once afterwards; contract.md documents single-drainer semantics",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c27",
+      "kind": "requirement",
+      "text": "Durable capture requires QoS 1 publishes and the docs must say so: EventClient.publish AND publish_event default to qos=0, so an importable-client producer publishing envelopes with defaults silently bypasses durable capture \u2014 'events emit' publishes qos=1 explicitly, and the client docstrings + contract.md state that QoS 0 bypasses capture",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h23",
+          "text": "'events emit' passes qos=1 explicitly (unit-asserted); client.py docstrings and contract.md both state that QoS 0 publishes bypass durable capture",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c28",
+      "kind": "requirement",
+      "text": "The history store is per-host like the stack itself: it lives beside the stack state (default_stack_dir's XDG convention, honouring an env override), never CWD-relative \u2014 'events list' answers the same from any directory \u2014 and every stored record carries a store-format version marker so a future migration has something to key on",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h24",
+          "text": "'events list' returns identical results from two different CWDs against the same host stack (test); stored records carry the format-version field from the first write",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
+    },
+    {
+      "id": "c29",
+      "kind": "requirement",
+      "text": "Subscription names and patterns are validated at the boundary: names are slugs, patterns use the dotted-type grammar with '*' only, and raw MQTT filter characters (#, +, /) are rejected with a field-level error \u2014 a pattern can never escape the events/ topic prefix",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h25",
+          "text": "Unit tests reject '#', 'a/+', 'a/b', '../x' and empty patterns with field-level errors, dockerless; the compiled filter is always prefixed events/",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": ""
     }
   ],
   "open_vagueness": [
@@ -486,6 +612,74 @@
         "c9",
         "c11"
       ]
+    },
+    {
+      "id": "s11",
+      "surface": "challenge pass / cheap-probe: scratch mosquitto 2.1.2-alpine on 127.0.0.1:18831 with the repo template",
+      "finding": "persistent session (clean_start=false, MQTT5 session-expiry 0xFFFFFFFF) reports session_present=true after a broker restart with zero extra broker config \u2014 the architecture's core premise holds; default queue bound is exactly 1000 with silent drop-NEWEST overflow, delivery in order, one broker log notice; probe container removed after",
+      "seeds": [
+        "c25"
+      ]
+    },
+    {
+      "id": "s12",
+      "surface": "challenge pass / concurrency lens: probe broker log (session takeover on same-client-id reconnect)",
+      "finding": "mosquitto logs 'disconnected: session taken over' \u2014 concurrent drains of one subscription kick the first drainer; persist-then-ack + id dedupe makes it lose nothing but the semantics must be documented and pinned by a test",
+      "seeds": [
+        "c26"
+      ]
+    },
+    {
+      "id": "s13",
+      "surface": "challenge pass / hidden-dependencies lens: events_cli/client.py publish + publish_event signatures",
+      "finding": "both default qos=0 (drop-don't-block, right for reachy) \u2014 but QoS 0 is never queued for offline sessions, so envelope publishers using defaults silently bypass durable capture; emit must pass qos=1 and the trap must be documented; whether publish_event's default flips is q3",
+      "seeds": [
+        "c27"
+      ]
+    },
+    {
+      "id": "s14",
+      "surface": "challenge pass / operations lens: docker ps on spark-f8a9 + docs/acceptance/2026-07-24-issue-3-live-run.md",
+      "finding": "events-mosquitto serves the robot's nervous system in production on this box right now; the first slice ran cutovers as timed service windows with a rehearsed rollback \u2014 the integration suite and the template rollout must follow the same discipline, which the spec previously never said",
+      "seeds": [
+        "c23"
+      ]
+    },
+    {
+      "id": "s15",
+      "surface": "challenge pass / lifecycle lens: events_cli/stack/__init__.py default_stack_dir",
+      "finding": "the stack is per-host by design (XDG config + EVENTS_STACK_DIR override, 'one broker per host is the deployment model') \u2014 the spec never said where the history store lives; a CWD-relative store would make 'events list' answer differently per directory, so the store must follow the stack's per-host convention",
+      "seeds": [
+        "c28"
+      ]
+    },
+    {
+      "id": "s16",
+      "surface": "challenge pass / unstated-assumptions lens: MQTT session/QoS semantics vs the spec's history claims",
+      "finding": "the spec reads as if history is a property of the fabric; it is a property of REGISTERED subscriptions \u2014 pre-registration and QoS 0 events are never captured, and no global capture exists until #8's control service; stated now as a boundary so consumers cannot assume a complete log",
+      "seeds": [
+        "c24"
+      ]
+    },
+    {
+      "id": "s17",
+      "surface": "challenge pass / cheap-probe: paho v2 API introspection (manual_ack, clean_start, MQTT5 properties)",
+      "finding": "paho 2.x exposes manual_ack at the constructor plus manual_ack_set/ack, clean_start on connect, and MQTT5 CONNECT properties \u2014 plan risk r2 settles positively; the persist-then-ack drain design is implementable as specified",
+      "seeds": []
+    },
+    {
+      "id": "s18",
+      "surface": "challenge pass / security lens: sub add input surface (name -> client id, pattern -> topic filter)",
+      "finding": "user-supplied names/patterns become MQTT client ids and topic filters \u2014 unvalidated, a pattern containing #, + or / could subscribe beyond the events/ prefix; seeded the boundary-validation requirement; no other injection surface found in the arc's verbs",
+      "seeds": [
+        "c29"
+      ]
+    },
+    {
+      "id": "s19",
+      "surface": "challenge pass / reversibility+observability lens: template rollout and drain-side loss visibility",
+      "finding": "rollback for the template change exists via the previous release's events init --force plus restart (first-slice precedent); overflow loss is visible only in the broker log (one notice line) \u2014 surfaced via the c25 documentation requirement; residual: a drainer still cannot detect a gap in-band, accepted as a documented limit of this arc (control-service capture at #8 removes it)",
+      "seeds": []
     }
   ]
 }
