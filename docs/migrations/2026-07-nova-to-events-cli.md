@@ -3,7 +3,7 @@
 - **Box**: `spark-f8a9`
 - **Direction**: `nova-mosquitto` + `nova-nervous-system` (LAN-exposed
   `eclipse-mosquitto:2`) -> the events-cli loopback-only broker
-  (`eclipse-mosquitto:2.1.2`, `127.0.0.1:1883:1883`).
+  (`eclipse-mosquitto:2.1.2-alpine`, `127.0.0.1:1883:1883`).
 - **Tracking issue**: [events-cli#3](https://github.com/agentculture/events-cli/issues/3).
 - **Plan**: `docs/plans/2026-07-23-events-first-slice.md`, task **t7**, risk
   **r3**.
@@ -195,7 +195,7 @@ ss -ltn | grep -E ':1883|:9001'
 # NO 0.0.0.0:1883, NO [::]:1883, and NOTHING on 9001 at all.
 
 docker ps --filter publish=1883 --format '{{.Names}}\t{{.Image}}\t{{.Ports}}'
-# Expect exactly ONE broker:  events-mosquitto  eclipse-mosquitto:2.1.2  127.0.0.1:1883->1883/tcp
+# Expect ONE broker:  events-mosquitto  eclipse-mosquitto:2.1.2-alpine  127.0.0.1:1883->1883/tcp
 ```
 
 ## Post-cutover verification checklist
@@ -204,7 +204,8 @@ Acceptance criterion 3 of task t7, as a checklist to tick after the forward
 cutover:
 
 - [ ] `docker ps` shows **exactly one** broker container, `events-mosquitto`
-      (`eclipse-mosquitto:2.1.2`), and it is healthy (`events status` exits 0).
+      (`eclipse-mosquitto:2.1.2-alpine`), and it is healthy (`events status`
+      exits 0).
 - [ ] `nova-mosquitto` and `nova-nervous-system` are **stopped** — absent from
       `docker ps` (Option A removed them; Option B leaves them `Exited`, still
       absent from a plain `docker ps`).

@@ -169,9 +169,11 @@ reviewer can read in the repository.
 
 ## What it generates
 
-- **`eclipse-mosquitto:2.1.2`** — an exact patch tag, never the floating
+- **`eclipse-mosquitto:2.1.2-alpine`** — an exact patch tag, never the floating
   `eclipse-mosquitto:2`. A floating tag swaps the broker and its defaults under
   a running deployment, and those defaults are what `mosquitto.conf` documents.
+  The `-alpine` suffix is required, not stylistic: upstream publishes the 2.1
+  line only in that form, so a bare `:2.1.2` fails to pull.
 - **`127.0.0.1:1883:1883`** — the published port mapping. Not a bare
   `1883:1883`. Docker publishes on `0.0.0.0` by default and its NAT rules are
   traversed before the host firewall, so a bare mapping is LAN-reachable no

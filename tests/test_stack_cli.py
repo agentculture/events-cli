@@ -20,7 +20,7 @@ from typing import Sequence
 import pytest
 
 from events_cli.cli import main
-from events_cli.stack import COMPOSE_FILENAME, MOSQUITTO_CONF_FILENAME
+from events_cli.stack import COMPOSE_FILENAME, MOSQUITTO_CONF_FILENAME, MOSQUITTO_IMAGE
 from events_cli.stack._docker import CommandResult
 
 
@@ -60,7 +60,7 @@ def _ps_row(**overrides) -> str:
     row = {
         "Name": "events-mosquitto",
         "Service": "broker",
-        "Image": "eclipse-mosquitto:2.1.2",
+        "Image": MOSQUITTO_IMAGE,
         "State": "running",
         "Health": "healthy",
         "Status": "Up 2 minutes (healthy)",
@@ -114,7 +114,7 @@ def test_init_writes_a_loopback_only_compose(tmp_path: Path) -> None:
     assert main(["init", "--dir", str(directory)]) == 0
     written = (directory / COMPOSE_FILENAME).read_text(encoding="utf-8")
     assert "127.0.0.1:1883:1883" in written
-    assert "eclipse-mosquitto:2.1.2" in written
+    assert MOSQUITTO_IMAGE in written
     # 0.0.0.0 may appear in a comment explaining the hazard, never in config.
     config = [line for line in written.splitlines() if not line.strip().startswith("#")]
     assert not any("0.0.0.0" in line for line in config)
@@ -129,7 +129,7 @@ def test_init_json_payload_shape(tmp_path: Path, capsys: pytest.CaptureFixture[s
     payload = json.loads(capsys.readouterr().out)
     assert payload["stack_dir"] == str(directory)
     assert len(payload["written"]) == 2
-    assert payload["image"] == "eclipse-mosquitto:2.1.2"
+    assert payload["image"] == MOSQUITTO_IMAGE
     assert payload["broker"]["published"] == "127.0.0.1:1883:1883"
     assert payload["broker"]["loopback_only"] is True
     assert payload["broker"]["websockets"] is False
@@ -173,8 +173,13 @@ def test_init_honours_the_stack_dir_environment_override(
 
 # --- up: the preflight refusal ---------------------------------------------
 
+# The foreign row keeps the floating `:2` deliberately — that is the tag the
+# real nova-mosquitto on this box runs, and the point is that it is not ours.
 _FOREIGN_PS = "bdc998b5f4e4|||nova-mosquitto|||eclipse-mosquitto:2|||0.0.0.0:1883->1883/tcp|||"
-_OURS_PS = "aaaa11112222|||events-mosquitto|||eclipse-mosquitto:2.1.2|||127.0.0.1:1883->1883/tcp|||events-cli"  # noqa: E501
+_OURS_PS = (
+    f"aaaa11112222|||events-mosquitto|||{MOSQUITTO_IMAGE}"
+    "|||127.0.0.1:1883->1883/tcp|||events-cli"
+)
 
 
 def test_up_refuses_when_a_foreign_broker_holds_the_port(

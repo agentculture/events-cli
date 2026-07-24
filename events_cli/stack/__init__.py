@@ -38,8 +38,18 @@ from pathlib import Path
 # edit is visible in a diff.
 
 #: Exact patch tag. Never the floating ``eclipse-mosquitto:2``.
-MOSQUITTO_IMAGE = "eclipse-mosquitto:2.1.2"
+#:
+#: The ``-alpine`` suffix is not a style choice — it is the only way to name
+#: this version. Upstream publishes the 2.1 line *exclusively* as
+#: ``2.1.x-alpine``; a bare ``eclipse-mosquitto:2.1.2`` has never existed and
+#: pulls fail with ``no such manifest`` (deviation d2). ``eclipse-mosquitto:2``
+#: and ``eclipse-mosquitto:2.1.2-alpine`` resolve to the same manifest digest
+#: today, so this pin names exactly what the floating tag serves — it just
+#: cannot move underneath us.
+MOSQUITTO_IMAGE = "eclipse-mosquitto:2.1.2-alpine"
 #: The broker version the generated ``mosquitto.conf`` documents defaults for.
+#: The *software* version, which is why it is not simply the tag's suffix-free
+#: form: the tag must be published, this must match ``mosquitto -h``.
 MOSQUITTO_VERSION = "2.1.2"
 
 #: Compose project name (``--project-name``), and the label preflight matches on.

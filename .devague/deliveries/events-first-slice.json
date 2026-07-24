@@ -2,7 +2,7 @@
   "plan_slug": "events-first-slice",
   "schema_version": 1,
   "created": "2026-07-24T04:29:51Z",
-  "updated": "2026-07-24T04:29:51Z",
+  "updated": "2026-07-24T13:18:58Z",
   "deviations": [
     {
       "id": "d1",
@@ -13,6 +13,16 @@
         "c4",
         "c27"
       ],
+      "origin": "llm",
+      "status": "proposed",
+      "classification": "acceptable"
+    },
+    {
+      "id": "d2",
+      "what": "Corrected the image pin to eclipse-mosquitto:2.1.2-alpine \u2014 the tag d1 chose, eclipse-mosquitto:2.1.2, is NOT published on Docker Hub (docker manifest inspect returns 'no such manifest'), so events up would fail to pull on any clean host and only worked here off a locally-cached image. The 2.1 line is published exclusively with the -alpine suffix (2.1.0-alpine, 2.1.1-alpine, 2.1.2-alpine). Verified eclipse-mosquitto:2 and eclipse-mosquitto:2.1.2-alpine resolve to an IDENTICAL manifest digest (sha256:6dba0f1b2795ddcb, linux/amd64), so the -alpine pin is byte-identical to what the floating tag serves today and d1's 9883-suppression reasoning is unchanged.",
+      "task_ref": "t8",
+      "reason": "d1 derived the version from the locally-cached image's org.opencontainers.image.version label (2.1.2) and pinned that string, without probing the registry for whether a tag of that exact name is published. The label reports the software version; it is not a tag name. Docker never pulled because the local cache satisfied the reference, so the gap stayed invisible until t8's integration suite tried a real pull.",
+      "affects": [],
       "origin": "llm",
       "status": "proposed",
       "classification": "acceptable"

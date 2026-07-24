@@ -160,20 +160,30 @@ def test_compose_pins_an_exact_patch_tag(compose: str) -> None:
     and will move again. The generated mosquitto.conf documents defaults *for a
     specific version* — 2.1 opens an http_api dashboard that 2.0 has no concept
     of — so a moving tag turns those comments into confident lies.
+
+    A variant suffix is allowed after the patch version (``2.1.2-alpine``)
+    because upstream publishes the 2.1 line *only* in that form — pinning the
+    suffix-free ``2.1.2`` names a tag that has never existed and fails to pull
+    with ``no such manifest`` (deviation d2). What must not appear is a tag that
+    can *move*, which is what the check below enforces.
     """
     image = _compose_image(compose)
     repository, _, tag = image.rpartition(":")
     assert repository, f"image {image!r} has no tag at all"
     assert re.fullmatch(
-        r"\d+\.\d+\.\d+", tag
+        r"\d+\.\d+\.\d+(?:-[a-z0-9.]+)?", tag
     ), f"image tag {tag!r} is not an exact major.minor.patch version"
-    assert tag not in {"2", "2.1", "latest"}
+    assert tag not in {"2", "2.1", "latest", "alpine", "openssl"}
 
 
 def test_compose_image_matches_the_declared_constant(compose: str) -> None:
     """The template and the Python constant cannot drift apart silently."""
     assert _compose_image(compose) == MOSQUITTO_IMAGE
-    assert MOSQUITTO_IMAGE.endswith(f":{MOSQUITTO_VERSION}")
+    # Not ``endswith(f":{MOSQUITTO_VERSION}")``: the tag legitimately carries a
+    # variant suffix the software version does not. The version must be the tag's
+    # version *component*, so the documented defaults still describe the image.
+    _, _, tag = MOSQUITTO_IMAGE.rpartition(":")
+    assert tag.split("-")[0] == MOSQUITTO_VERSION
 
 
 # --- criterion 1: no websocket listener ------------------------------------

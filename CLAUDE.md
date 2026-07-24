@@ -235,7 +235,7 @@ guarantee:
   `127.0.0.1:1883:1883`, never a bare `1883:1883`. Docker's DNAT bypasses the
   host firewall, so the host-address prefix is the only thing keeping the broker
   off the LAN; remote access is a documented opt-in that edits `compose.yaml`.
-- **An exact image pin**: `eclipse-mosquitto:2.1.2`, never the floating
+- **An exact image pin**: `eclipse-mosquitto:2.1.2-alpine`, never the floating
   `eclipse-mosquitto:2`. This matters more than it looks (**deviation d1**): the
   `:2` tag now resolves to **2.1.2, not 2.0.x**, and 2.1.2 opens an
   **unauthenticated dashboard/http-api listener on 9883** by default — the
@@ -243,6 +243,15 @@ guarantee:
   the default listener set wholesale, so no 9883 (and no 9001 websocket) socket
   is opened and none is published. A unit test fails if the template ever carries
   a bare floating major tag.
+  **The `-alpine` suffix is load-bearing** (**deviation d2**): upstream publishes
+  the 2.1 line *only* in that form, so the suffix-free `eclipse-mosquitto:2.1.2`
+  — which d1 originally pinned, reading the version off the local image's OCI
+  label — is a tag that has never existed. It pulls with `no such manifest`,
+  which no dockerless test and no cache-warm host can catch; `2.1.2-alpine` and
+  the floating `:2` share a manifest digest today, so the pin names exactly what
+  `:2` serves, frozen. `test_the_pinned_image_tag_is_actually_pullable` (stack
+  marker) asks the *registry*, not the local image store, and is the standing
+  guard.
 - **Persistence that actually persists**: `persistence true` **plus** the mounted
   `events-data` named volume (the setting alone writes into the container layer
   and vanishes on `down`), with `autosave_interval` set explicitly so the
@@ -554,7 +563,7 @@ culture.yaml              mesh identity (suffix + backend)
 2. **The importable client** — `EventClient`, O(1) enqueue, retained / LWT /
    QoS 0, on `paho-mqtt` as a base dependency (`events_cli/client.py`).
 3. **Stack management** — `events init/up/status/logs/down`, Compose pinned to
-   `eclipse-mosquitto:2.1.2` with `127.0.0.1:1883:1883`, `persistence true` +
+   `eclipse-mosquitto:2.1.2-alpine` with `127.0.0.1:1883:1883`, `persistence true` +
    volume, and a foreign-broker preflight (`events_cli/stack/`).
 
 **Deferred, each tracked as its own arc.** These carry a confirmed spec contract

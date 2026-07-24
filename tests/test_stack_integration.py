@@ -21,13 +21,14 @@ The throwaway broker
 --------------------
 Each test that needs a broker spins up its OWN, via :func:`broker_factory`:
 
-* image: ``eclipse-mosquitto:2.1.2`` if present, else ``eclipse-mosquitto:2``
-  (override with ``EVENTS_TEST_IMAGE``). NOTE: the ``:2.1.2`` tag is **not
-  published on Docker Hub** — ``docker pull eclipse-mosquitto:2.1.2`` returns
-  ``manifest unknown``. Only the floating ``:2`` tag exists, and it currently
-  carries the 2.1.2 build (``mosquitto version 2.1.2`` /
-  ``org.opencontainers.image.version=2.1.2``). The stack's compose template pins
-  ``:2.1.2``; that pin is only satisfiable from a locally-retagged image today.
+* image: the stack's own pin (:data:`~events_cli.stack.MOSQUITTO_IMAGE`) if
+  present, else ``eclipse-mosquitto:2`` (override with ``EVENTS_TEST_IMAGE``).
+  This suite is what caught **deviation d2**: the pin was originally the
+  suffix-free ``eclipse-mosquitto:2.1.2``, which upstream has never published —
+  a pull returns ``no such manifest``, so ``events up`` would have failed on any
+  clean host while passing here off a locally-cached image. The 2.1 line ships
+  only as ``2.1.x-alpine``. :func:`test_the_pinned_image_tag_is_actually_pullable`
+  below is the standing guard against that class of bug.
 * a **uniquely named** container (``events-cli-it-<pid>-<rand>``) and named
   volume (``events-cli-it-data-<pid>-<rand>``) — never ``events-mosquitto`` /
   ``events-cli`` (the real stack's names) and never any ``nova-*`` name.
@@ -496,6 +497,46 @@ def test_default_selection_excludes_every_stack_test() -> None:
     ), "this file's integration tests should be in the stack set"
     leaked = stack_ids & default_ids
     assert not leaked, f"stack tests leaked into the default selection: {sorted(leaked)}"
+
+
+# --- the pin is a name a registry will actually serve ----------------------
+
+
+@pytest.mark.stack
+def test_the_pinned_image_tag_is_actually_pullable() -> None:
+    """``MOSQUITTO_IMAGE`` must name a tag the registry publishes.
+
+    This is the guard for **deviation d2**. The pin was originally
+    ``eclipse-mosquitto:2.1.2``, taken from the local image's
+    ``org.opencontainers.image.version`` label — but that label reports the
+    *software* version, and upstream publishes the 2.1 line only as
+    ``2.1.x-alpine``. No such tag was ever pushed, so ``events up`` would have
+    died with ``no such manifest`` on the first clean host to try it, while
+    every dockerless unit test and every run on this box passed: the local
+    cache satisfied the reference so nothing ever pulled.
+
+    ``docker manifest inspect`` asks the registry directly and does **not**
+    consult the local image store, which is exactly the check that was missing.
+    Network-dependent, hence the ``stack`` marker and the opt-in gate.
+    """
+    if not os.environ.get(_OPT_IN_ENV):
+        pytest.skip(f"set {_OPT_IN_ENV}=1 to run the docker-backed stack integration suite")
+    if not docker_available():
+        pytest.skip("docker is not on PATH")
+
+    probe = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        ["docker", "manifest", "inspect", MOSQUITTO_IMAGE],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    if probe.returncode != 0 and "no such manifest" not in (probe.stderr or "").lower():
+        pytest.skip(f"registry unreachable, cannot verify the pin: {probe.stderr.strip()[:200]}")
+    assert probe.returncode == 0, (
+        f"the pinned image {MOSQUITTO_IMAGE!r} is not published — `events up` would fail to "
+        f"pull on a clean host. docker said: {probe.stderr.strip()[:200]}"
+    )
 
 
 # --- retained state across a clean restart ---------------------------------

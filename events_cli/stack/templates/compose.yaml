@@ -26,12 +26,17 @@ services:
     # tag. A floating tag silently swaps the broker — and its defaults — under a
     # running deployment; the `mosquitto.conf` beside this file documents
     # upstream defaults for this exact version and would quietly go stale.
-    # Verified locally: `mosquitto -h` in this image reports "mosquitto version
-    # 2.1.2", the image carries the OCI label
-    # org.opencontainers.image.version=2.1.2, and the `eclipse-mosquitto:2` tag
-    # resolved to digest
-    # sha256:9cfdd46ad59f3e3e5f592f6baf57ab23e1ad00605509d0f5c1e9b179c5314d87.
-    image: eclipse-mosquitto:2.1.2
+    #
+    # The `-alpine` suffix is mandatory, not cosmetic: upstream publishes the
+    # 2.1 line ONLY as `2.1.x-alpine`. A bare `eclipse-mosquitto:2.1.2` does not
+    # exist on Docker Hub and fails to pull with `no such manifest`.
+    #
+    # Verified against the registry: `eclipse-mosquitto:2` and
+    # `eclipse-mosquitto:2.1.2-alpine` resolve to the SAME linux/amd64 manifest
+    # digest (sha256:6dba0f1b2795ddcb…), so this pin is what the floating tag
+    # serves today — frozen. `mosquitto -h` in it reports "mosquitto version
+    # 2.1.2" and it carries the OCI label org.opencontainers.image.version=2.1.2.
+    image: eclipse-mosquitto:2.1.2-alpine
     container_name: events-mosquitto
     restart: unless-stopped
     ports:
