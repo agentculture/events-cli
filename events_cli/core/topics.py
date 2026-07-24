@@ -92,6 +92,13 @@ _RESERVED_MQTT_CHARS = (MQTT_MULTI_LEVEL_WILDCARD, MQTT_SINGLE_LEVEL_WILDCARD, "
 
 _EVENTS_PREFIX = f"{TOPIC_PREFIX}/"
 
+# The three validation-failure summaries, named once. Each is raised from
+# several places in this module, and a summary that drifts between two of them
+# reads to a caller as two different failures.
+_INVALID_TYPE = "invalid event type"
+_INVALID_TOPIC = "invalid topic"
+_INVALID_PATTERN = "invalid topic pattern"
+
 
 def _check_no_reserved_mqtt_chars(field_name: str, text: str, errors: list[FieldError]) -> None:
     found = sorted(ch for ch in _RESERVED_MQTT_CHARS if ch in text)
@@ -123,7 +130,7 @@ def type_to_topic(event_type: str) -> str:
     errors: list[FieldError] = []
     _check_event_type("type", event_type, errors)
     if errors:
-        raise TopicValidationError(errors, summary="invalid event type")
+        raise TopicValidationError(errors, summary=_INVALID_TYPE)
     return "/".join((TOPIC_PREFIX, *event_type.split(".")))
 
 
@@ -141,7 +148,7 @@ def topic_to_type(topic: str) -> str:
     errors: list[FieldError] = []
     text = _check_text("topic", topic, errors)
     if text is None:
-        raise TopicValidationError(errors, summary="invalid topic")
+        raise TopicValidationError(errors, summary=_INVALID_TOPIC)
 
     if not text.startswith(_EVENTS_PREFIX):
         errors.append(
@@ -149,18 +156,18 @@ def topic_to_type(topic: str) -> str:
                 "topic", "malformed", f"must start with '{_EVENTS_PREFIX}' (the contract lane)"
             )
         )
-        raise TopicValidationError(errors, summary="invalid topic")
+        raise TopicValidationError(errors, summary=_INVALID_TOPIC)
 
     remainder = text[len(_EVENTS_PREFIX) :]
     segments = remainder.split("/")
     if not remainder or any(segment == "" for segment in segments):
         errors.append(FieldError("topic", "malformed", "must not contain an empty topic level"))
-        raise TopicValidationError(errors, summary="invalid topic")
+        raise TopicValidationError(errors, summary=_INVALID_TOPIC)
 
     candidate = ".".join(segments)
     _check_event_type("topic", candidate, errors)
     if errors:
-        raise TopicValidationError(errors, summary="invalid topic")
+        raise TopicValidationError(errors, summary=_INVALID_TOPIC)
     return candidate
 
 
@@ -191,11 +198,11 @@ def pattern_to_filter(pattern: str) -> str:
     errors: list[FieldError] = []
     text = _check_text("pattern", pattern, errors)
     if text is None:
-        raise TopicValidationError(errors, summary="invalid topic pattern")
+        raise TopicValidationError(errors, summary=_INVALID_PATTERN)
 
     _check_no_reserved_mqtt_chars("pattern", text, errors)
     if errors:
-        raise TopicValidationError(errors, summary="invalid topic pattern")
+        raise TopicValidationError(errors, summary=_INVALID_PATTERN)
 
     compiled_segments: list[str] = []
     for segment in text.split("."):
@@ -210,7 +217,7 @@ def pattern_to_filter(pattern: str) -> str:
             compiled_segments.append(segment)
 
     if errors:
-        raise TopicValidationError(errors, summary="invalid topic pattern")
+        raise TopicValidationError(errors, summary=_INVALID_PATTERN)
     return "/".join((TOPIC_PREFIX, *compiled_segments))
 
 

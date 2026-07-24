@@ -493,8 +493,15 @@ def test_an_empty_registry_lists_nothing_without_creating_anything(tmp_path: Pat
 
 
 def test_the_client_id_is_a_pure_function_of_the_name() -> None:
-    assert client_id_for("robot") == client_id_for("robot")
-    assert client_id_for("robot").startswith(CLIENT_ID_PREFIX)
+    """Pin the exact derivation, not ``f(x) == f(x)``.
+
+    Comparing two calls in one process is nearly vacuous: it catches only
+    per-call randomness, and still passes when the id is derived from the pid,
+    the host or the cwd — which is the failure that actually orphans a session
+    (``test_the_client_id_is_stable_across_processes`` covers that half).
+    Asserting the derived value itself is what pins the contract.
+    """
+    assert client_id_for("robot") == f"{CLIENT_ID_PREFIX}robot"
 
 
 def test_two_names_never_share_a_client_id() -> None:

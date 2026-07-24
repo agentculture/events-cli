@@ -547,9 +547,22 @@ def test_list_spans_subscriptions(store: HistoryStore) -> None:
 
 
 def test_list_is_deterministic_across_repeated_calls(store: HistoryStore) -> None:
+    """Determinism must survive a *fresh reader*, not just a repeated call.
+
+    ``store.list() == store.list()`` is nearly vacuous — nothing mutates
+    between the two calls, so it passes even when the order is an accident of
+    in-memory state. Reading the same root through a second store instance is
+    the assertion that bites: it fails if ordering ever depends on anything but
+    what is on disk (a raw ``glob`` order, say, rather than the sequence).
+    """
     for n in range(4):
         store.append(event(n), "builder" if n % 2 else "watcher")
-    assert store.list(max=10) == store.list(max=10)
+
+    first = store.list(max=10)
+    reopened = HistoryStore(store.root).list(max=10)
+
+    assert [(r.subscription, r.seq) for r in reopened] == [(r.subscription, r.seq) for r in first]
+    assert len(first) == 4
 
 
 def test_subscriptions_are_reported_sorted(store: HistoryStore) -> None:
