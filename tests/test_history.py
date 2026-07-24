@@ -726,6 +726,69 @@ def test_a_stale_ids_sidecar_is_rebuilt(store: HistoryStore) -> None:
     assert ids_path(store, "builder").read_text(encoding="utf-8").splitlines()[0] == envelope.id
 
 
+def test_get_never_answers_from_a_stale_sidecar(store: HistoryStore) -> None:
+    """A read must validate the sidecar, not trust the position it reports.
+
+    ``ids.txt`` is derived state. The *append* path already notices when it has
+    gone stale and rebuilds it — but ``get`` used to take the position on faith
+    and return whatever record sat there, which for a shifted sidecar is a
+    **different event than the one asked for**. That is the worst shape of
+    wrong: a confident answer, not an error.
+
+    Here the sidecar is rewritten so the two ids are transposed. A trusting
+    ``get`` hands back the wrong record; the fixed one detects the disagreement,
+    rebuilds from the log, and answers correctly.
+    """
+    first, second = event(1), event(2)
+    store.append(first, "builder")
+    store.append(second, "builder")
+
+    # Transposed: position 0 now claims to hold `second`, and vice versa.
+    ids_path(store, "builder").write_text(f"{second.id}\n{first.id}\n", encoding="utf-8")
+
+    found = HistoryStore(store.root).get(first.id)
+    assert found is not None
+    assert found.envelope.id == first.id, "get answered from the stale sidecar"
+    assert found.envelope.data == {"n": 1}
+    # And the sidecar was repaired on the way, so the next read is clean.
+    assert ids_path(store, "builder").read_text(encoding="utf-8").splitlines() == [
+        first.id,
+        second.id,
+    ]
+
+
+def test_read_ids_offset_survives_an_undecodable_byte(store: HistoryStore) -> None:
+    """The incremental-refresh offset is byte arithmetic, not decoded-text arithmetic.
+
+    Measuring the trailing fragment by re-encoding decoded text is not
+    byte-stable: an undecodable byte in a corrupt sidecar decodes to U+FFFD and
+    re-encodes to three bytes, so the offset drifts and the next refresh starts
+    mid-id. Splitting on the raw bytes keeps the boundary exact.
+
+    The undecodable bytes must sit in the **trailing fragment** for the drift
+    to show: a fragment of pure ASCII (or none at all) re-encodes to its own
+    length, and there the old arithmetic happened to agree.
+    """
+    envelope = event(1)
+    store.append(envelope, "builder")
+    path = ids_path(store, "builder")
+    # A complete line, then a partial one carrying two undecodable bytes. Each
+    # decodes to U+FFFD, which re-encodes to three bytes — so measuring the
+    # fragment through decoded text overstates it by four and pulls the offset
+    # back into the middle of the completed id.
+    path.write_bytes(f"{envelope.id}\n".encode("utf-8") + b"\xff\xfe")
+
+    backend = HistoryStore(store.root)._backend  # type: ignore[attr-defined]
+    lines, offset = backend._read_ids("builder", 0)
+
+    assert lines == [envelope.id]
+    # The boundary is exactly past the last newline — not the file size (there
+    # is an incomplete fragment after it) and not size-minus-re-encoded-length.
+    assert offset == path.stat().st_size - 2
+    # Resuming from it yields nothing new rather than re-reading a half id.
+    assert backend._read_ids("builder", offset) == ([], offset)
+
+
 def test_repairing_the_sidecars_leaves_no_temporary_files_behind(store: HistoryStore) -> None:
     store.append(event(1), "builder")
     ids_path(store, "builder").unlink()

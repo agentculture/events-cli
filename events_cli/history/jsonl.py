@@ -239,12 +239,21 @@ class JsonlBackend:
         with path.open("rb") as handle:
             handle.seek(offset)
             blob = handle.read(size - offset)
-        text = blob.decode("utf-8", errors="replace")
         # A trailing fragment is an id whose line is not yet complete; leave it
         # for the next refresh rather than reading half an id.
-        complete, _, remainder = text.rpartition("\n")
+        #
+        # The split is done on BYTES, not on decoded text. Decoding with
+        # errors="replace" and then re-encoding the remainder to measure it is
+        # not byte-stable: a corrupt sidecar's undecodable byte becomes U+FFFD,
+        # which re-encodes to three bytes, so the returned offset would drift
+        # past the real line boundary and the next refresh would read from the
+        # middle of an id.
+        cut = blob.rfind(b"\n")
+        if cut == -1:
+            return [], offset
+        complete = blob[:cut].decode("utf-8", errors="replace")
         lines = [line for line in complete.split("\n") if line]
-        return lines, size - len(remainder.encode("utf-8"))
+        return lines, offset + cut + 1
 
     def _rebuild_ids(self, sub: str) -> None:
         """Re-derive ``ids.txt`` from the committed records, atomically.
@@ -424,12 +433,40 @@ class JsonlBackend:
         )
 
     def get(self, id: str) -> HistoryRecord | None:
+        """The record with this event id, or ``None``.
+
+        ``ids.txt`` is a *derived* sidecar and can lag the log — the append path
+        notices and rebuilds it, but a read must not simply trust the position
+        it reports. So the candidate record is fetched and its own id checked:
+        a disagreement means the sidecar is stale, and returning that record
+        would answer a lookup with a *different* event, which is the worst shape
+        of wrong — a confident answer rather than an error. On a mismatch the
+        sidecar is rebuilt from the log (the same repair the append path uses)
+        and the lookup retried once against the truth.
+        """
         for sub in self.subscriptions():
-            count = self._count(sub)
-            ids, _ = self._read_ids(sub, 0)
-            for position, event_id in enumerate(ids[:count]):
-                if event_id == id:
-                    return self._records(sub, position + 1, 1)[0]
+            found = self._get_in(sub, id, repaired=False)
+            if found is not None:
+                return found
+        return None
+
+    def _get_in(self, sub: str, id: str, *, repaired: bool) -> HistoryRecord | None:
+        count = self._count(sub)
+        ids, _ = self._read_ids(sub, 0)
+        for position, event_id in enumerate(ids[:count]):
+            if event_id != id:
+                continue
+            record = self._records(sub, position + 1, 1)[0]
+            if record.envelope.id == id:
+                return record
+            if repaired:
+                raise HistoryCorruptError(
+                    f"{sub}: the id index disagrees with the log at sequence "
+                    f"{position + 1} even after a rebuild",
+                    remediation=_repair_hint(self._sub_dir(sub)),
+                )
+            self._rebuild_ids(sub)
+            return self._get_in(sub, id, repaired=True)
         return None
 
     def list(self, type: str | None, max: int) -> tuple[HistoryRecord, ...]:

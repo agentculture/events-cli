@@ -48,6 +48,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -386,6 +387,57 @@ def test_a_duplicate_name_is_refused(registry: SubscriptionRegistry) -> None:
     with pytest.raises(DuplicateSubscriptionError) as excinfo:
         registry.add(duplicate)
     assert excinfo.value.remediation
+
+
+def test_concurrent_adds_of_one_name_refuse_exactly_one(registry: SubscriptionRegistry) -> None:
+    """The duplicate check must be atomic, not check-then-write.
+
+    The sequential test above passes just as happily against an
+    ``exists()``-then-:func:`os.replace` implementation, because nothing races
+    it. This one does race it, and that version failed two ways at once: across
+    processes both adds passed the existence check and the second silently
+    clobbered the first, and *within* one process the two writers shared a
+    pid-named temp file, so one raised a bare ``FileNotFoundError`` — a
+    traceback escaping a CLI that promises none — after overwriting the other's
+    content. The record that survived could belong to the add that had *not*
+    reported success.
+
+    So: exactly one add succeeds, the other raises
+    :class:`DuplicateSubscriptionError`, and the stored record is the one whose
+    caller was told it had registered.
+    """
+    barrier = threading.Barrier(2)
+    outcomes: list[tuple[str, str]] = []
+    lock = threading.Lock()
+
+    def add(pattern: str) -> None:
+        record = SubscriptionRecord.new("robot", pattern)
+        barrier.wait()  # widen the window both writers are inside
+        try:
+            registry.add(record)
+            result = ("ok", pattern)
+        except DuplicateSubscriptionError:
+            result = ("refused", pattern)
+        with lock:
+            outcomes.append(result)
+
+    threads = [threading.Thread(target=add, args=(p,)) for p in ("task.*", "scope.*")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    accepted = [pattern for status, pattern in outcomes if status == "ok"]
+    refused = [pattern for status, pattern in outcomes if status == "refused"]
+    assert len(accepted) == 1, f"expected exactly one add to win, got {outcomes}"
+    assert len(refused) == 1, f"expected exactly one refusal, got {outcomes}"
+
+    stored = registry.list()
+    assert [record.name for record in stored] == ["robot"]
+    # The winner's own record is what landed — not the loser's content under
+    # the winner's name, which is what the shared temp file used to produce.
+    assert stored[0].pattern == accepted[0]
+    assert not list(registry.root.glob("*.tmp")), "a temp sibling was left behind"
 
 
 def test_removing_an_unknown_name_is_a_named_error(registry: SubscriptionRegistry) -> None:

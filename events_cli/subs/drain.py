@@ -439,8 +439,10 @@ def _read_back(store: HistoryStore, sub: str, seq: int) -> HistoryRecord:
         raise DrainError(
             f"could not read back event {seq} of subscription {sub!r} ({exc})",
             remediation=(
-                "the event was stored and acknowledged; inspect the history store "
-                "(EVENTS_HISTORY_DIR, or $XDG_CONFIG_HOME/events-cli/history by default)"
+                "the event was stored but NOT acknowledged, so the broker will "
+                "redeliver it once the store is readable again; inspect the history "
+                "store (EVENTS_HISTORY_DIR, or $XDG_CONFIG_HOME/events-cli/history "
+                "by default)"
             ),
         ) from exc
     if not page.records:

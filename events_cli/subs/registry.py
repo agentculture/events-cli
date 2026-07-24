@@ -34,10 +34,17 @@ the whole registry down instead of one record. One file per name makes an add a
 single atomic create, a remove a single unlink, and a corrupt record a fault
 that names exactly one subscription.
 
-Writes go through a temp sibling plus :func:`os.replace`, the same idiom
-:mod:`events_cli.history.jsonl` uses for its sidecars: the rename is atomic, so
-a crash mid-write leaves either the previous record or none — never half of
-one. The name is validated before it is ever joined onto the root, so a
+An add writes a **uniquely named** temp sibling, fsyncs it, and publishes it
+with :func:`os.link` — create-if-absent, so the filesystem itself is the
+exclusivity check and no lock is needed. Deliberately *not* the temp-plus-
+:func:`os.replace` idiom :mod:`events_cli.history.jsonl` uses for its sidecars:
+``os.replace`` overwrites unconditionally, which is correct there (those
+rewrites happen under an ``flock``, and rewriting is the point) and wrong here,
+where an add must refuse a name that already exists. See :func:`_create_file`
+for the two concrete failures that idiom produced. A crash mid-write leaves
+either the previous record or none — never half of one.
+
+The name is validated before it is ever joined onto the root, so a
 caller-supplied string cannot address a path outside the registry.
 """
 
@@ -45,6 +52,7 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from pathlib import Path
 
 from events_cli.history import default_history_dir
@@ -167,19 +175,9 @@ class SubscriptionRegistry:
         describing different things.
         """
         path = self._path(record.name)
-        if path.exists():
-            raise DuplicateSubscriptionError(
-                f"subscription {record.name!r} is already registered",
-                remediation=(
-                    f"choose another name, or remove the existing one first: "
-                    f"'events sub remove {record.name}'"
-                ),
-            )
         self.root.mkdir(parents=True, exist_ok=True)
-        _replace_file(
-            path,
-            (json.dumps(record.to_dict(), ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
-        )
+        blob = (json.dumps(record.to_dict(), ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+        _create_file(path, blob, name=record.name)
         return record
 
     def remove(self, name: str) -> SubscriptionRecord:
@@ -201,20 +199,49 @@ class SubscriptionRegistry:
         return record
 
 
-def _replace_file(path: Path, blob: bytes) -> None:
-    """Write ``blob`` to ``path`` via a temp sibling and :func:`os.replace`.
+def _create_file(path: Path, blob: bytes, *, name: str) -> None:
+    """Create ``path`` with ``blob``, refusing to overwrite an existing file.
 
-    The same atomic-write idiom :mod:`events_cli.history.jsonl` uses for its
-    sidecars. The rename is atomic, so a crash mid-write leaves the previous
-    record intact rather than a truncated one.
+    **Create-if-absent, not write-then-rename.** An earlier version checked
+    ``path.exists()`` and then wrote through :func:`os.replace`, which is two
+    bugs wearing one coat:
+
+    * :func:`os.replace` overwrites unconditionally, so the existence check was
+      a time-of-check/time-of-use window. Two processes registering the same
+      name could both pass the check and both "succeed", the second silently
+      clobbering the first — while the caller of each was told it had
+      registered a subscription. The record left on disk then described a
+      different filter than the broker session one of them had just created.
+    * the temp file was named for the **pid**, not for the writer, so two
+      concurrent writers *inside one process* shared a scratch path. One would
+      rename it away and the other's :func:`os.replace` would raise
+      ``FileNotFoundError`` — a traceback escaping a CLI that guarantees none —
+      after having overwritten the first writer's content.
+
+    :func:`os.link` closes both: it fails with ``FileExistsError`` if the
+    target exists, and it is the filesystem's own atomic exclusivity check, so
+    no lock is needed. The temp sibling is still written and fsynced first, so
+    the link only ever publishes a complete record — the durability property
+    the previous idiom had, kept.
     """
-    temp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    # Unique per writer, not per process: two threads in one process must not
+    # share a scratch path.
+    temp = path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
     try:
         with temp.open("wb") as handle:
             handle.write(blob)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temp, path)
+        try:
+            os.link(temp, path)
+        except FileExistsError as exc:
+            raise DuplicateSubscriptionError(
+                f"subscription {name!r} is already registered",
+                remediation=(
+                    f"choose another name, or remove the existing one first: "
+                    f"'events sub remove {name}'"
+                ),
+            ) from exc
     finally:
         temp.unlink(missing_ok=True)
 
