@@ -29,6 +29,7 @@ decided design constraint with an issue, not a shipped behaviour.
 | Lane | Status |
 |------|--------|
 | Envelope core — CloudEvents-shaped, immutable, pure and dockerless | built (first slice) |
+| Canonical topic mapping — dotted `type` ⇄ MQTT topic (`events_cli/core/topics.py`) | built (second wave) |
 | Importable publish client — `import events_cli` | built (first slice) |
 | Raw MQTT port — TCP 1883 on loopback | supported surface (first slice) |
 | Stack verbs — `events init` / `up` / `status` / `logs` / `down` | built (first slice) |
@@ -200,6 +201,151 @@ deliberately designed together with durable subscriptions rather than bolted on
 afterwards ([#7](https://github.com/agentculture/events-cli/issues/7)). It does
 not exist yet. Nothing in this repo should be read as implying retained ==
 history.
+
+## The canonical topic mapping
+
+Every contract-lane topic is derived mechanically from an event's dotted
+`type`, never invented by hand: `events_cli/core/topics.py` is the one place
+that mapping is defined, and every other layer — the importable client, the
+subscription registry, the drain engine, the CLI verbs — is required to go
+through it rather than construct topic strings itself. A dot in a dotted
+`type` becomes an MQTT topic level, and the literal segment `events` is
+prepended to everything the module produces:
+
+| Dotted type / pattern | MQTT topic / filter |
+|------------------------|----------------------|
+| `task.requested` | `events/task/requested` |
+| `heartbeat` | `events/heartbeat` |
+| `task.*` (pattern) | `events/task/+` (filter) |
+
+Two rules keep the mapping unambiguous:
+
+- **`*` matches exactly one dotted segment**, and always compiles to MQTT's
+  single-level wildcard `+` — **never** the multi-level `#`. `task.*` selects
+  `task.requested` and `task.completed` but not a grandchild such as
+  `task.sub.completed`; compiling it to `#` would let a pattern's reach widen
+  silently every time a producer added a deeper segment.
+- **A pattern must never contain a raw MQTT filter character** — `#`, `+`, or
+  the level separator `/` itself. Those carry MQTT structural meaning a
+  hand-typed dotted pattern must never smuggle in; most importantly, they are
+  exactly what would let a pattern escape the `events/` prefix. Rejecting them
+  outright, rather than passing them through, is a confirmed finding from this
+  arc's challenge pass, not a defensive guess.
+
+The `events/` prefix is what separates this contract lane from a
+[producer-owned topic tree](#the-raw-mqtt-port-is-first-class) such as
+`reachy-mini-cli`'s `reachy/events/{source}/{type}` and retained
+`reachy/state/{key}`. No dotted event type can spell its way out of the
+prefix — an event literally typed `reachy.state.updated` still maps to
+`events/reachy/state/updated`, never to `reachy/state/updated` — and no
+contract-lane filter can reach into a producer's own tree either.
+
+## The backlog bound: queued messages for an offline session
+
+A persistent MQTT session's queue for a subscriber that is currently offline
+is not unbounded, and the bound is not something `events-cli` invents — it is
+mosquitto's own `max_queued_messages` setting, which the generated
+`mosquitto.conf` now states explicitly, next to the `persistence` block, so it
+is a documented number rather than an inherited default.
+
+**Measured, not assumed.** On 2026-07-24 a scratch `eclipse-mosquitto:2.1.2-alpine`
+broker was run with this repo's exact template config and probed directly:
+
+- An MQTT5 persistent session (`clean_start=False`, CONNECT
+  `SessionExpiryInterval=0xFFFFFFFF`) reported `session_present=True` after a
+  **broker restart**, with no extra broker configuration — subscription
+  registration and queued backlog both survive.
+- **1200** QoS-1 messages were published while the subscriber was offline. On
+  resume, exactly **1000** arrived, **in order**, and they were the
+  **OLDEST** ones (`m00000` … `m00999`). The 200 newest were **dropped**.
+
+That makes mosquitto 2.1.2's overflow behaviour concrete: once the queue is
+full, the broker **keeps the backlog it already has and refuses new
+arrivals** — it does not evict the head to make room for the tail. A session
+that overflows loses its most recent events, not its oldest ones.
+
+**The only in-band signal is a broker log line** —
+`Outgoing messages are being dropped for client <id>.` — reachable via
+`events logs`; there is no `$SYS` topic and no distinct disconnect reason for
+it. A design that must detect overflow has to watch that log line, or,
+better, drain often enough that reaching the bound stays unrealistic — see
+cursor-drain semantics below.
+
+## The designed consume side: cursor drain, single-drainer, and the capture boundary
+
+Everything in this section is **designed, not built**. There is no
+subscription registry, no history store, and no `events sub`, `events watch`,
+`events emit`, `events get` or `events list` verb in this repo today — see the
+[status table](#what-is-built-and-what-is-not) above, unchanged by this
+section. What follows is the confirmed contract those verbs must satisfy when
+[#7](https://github.com/agentculture/events-cli/issues/7) lands, written down
+now so the shape is decided before the code exists, not discovered while
+writing it.
+
+**Cursor-drain semantics.** A long-lived MQTT subscription blocks a request in
+every request/response surface — an MCP tool call, an HTTP request — and the
+CLI is the only surface that can stream forever, so the consume verb cannot be
+an endless `watch` everywhere. The shape designed to work identically on every
+surface is a **bounded drain over a durable, server-side, named
+subscription**: `events watch <sub> --since <cursor> --max N --timeout S` is
+designed to resume the subscription's persistent session, consume up to
+`--max` events or until the `--timeout` deadline, persist each event to the
+history store **before** acknowledging it, and return the batch plus the next
+cursor. Every agent-facing verb in this arc is designed to carry `--max` and
+`--timeout` with **non-infinite defaults** — an unbounded default eventually
+hangs an agent turn — and there is deliberately no `--follow`; unbounded
+streaming stays an HTTP-only concern for a later arc.
+
+**Single-drainer semantics.** A named subscription is designed to be drained
+by **one** process at a time. MQTT itself enforces this: a persistent session
+is identified by its client id, and a second process connecting with the same
+id causes the broker to **take over** the session and disconnect the first —
+the 2026-07-24 probe observed exactly this log line: `Client <id> [(null):0]
+disconnected: session taken over.` A concurrent second drainer is therefore
+not a silent race; it is an observable disconnect of whichever drainer was
+already connected. Persisting each event to the history store **before**
+acknowledging it — the same ordering the backlog-bound section above assumes —
+is what is designed to make a takeover **lossless** rather than merely loud:
+the outgoing drainer may have delivered a batch it never got to acknowledge,
+but nothing it already persisted is lost, and the incoming drainer resumes the
+same session with the same queued backlog. Consumer-side dedupe on the
+envelope `id` — already a contract requirement,
+[above](#delivery-is-at-least-once-so-consumers-must-dedupe) — is what makes a
+takeover safe to retry rather than merely lossless.
+
+**The capture boundary.** History is designed to capture only what a
+**registered subscription's persistent session actually queued** — nothing
+more. Three concrete consequences:
+
+- An event published **before** a subscription is registered is transported by
+  the broker to whichever other subscriber wants it, but was never queued for
+  this one, so a later drain of that subscription will never return it. There
+  is no retroactive capture.
+- An event published at **QoS 0** is never queued for an offline session at
+  all — MQTT's own delivery model, not an `events-cli` choice — so it is never
+  captured regardless of whether a subscription exists. See the QoS trap
+  below.
+- There is **no global capture** of contract-lane traffic until a control
+  service exists to run one; today, and until #7 lands, nothing published to
+  `events/…` is captured at all. Once built, `events list` is designed to read
+  only what registered subscriptions actually drained — a view over what was
+  captured, never a claim that every event ever published is in it. Consumers
+  must not read it as a complete log.
+
+## The QoS trap: `publish()` defaults to QoS 0
+
+`EventClient.publish()` and `publish_event()` (`events_cli/client.py`) both
+default to `qos=0` today — correct for the raw, co-located,
+drop-don't-block lane [described above](#the-raw-mqtt-port-is-first-class),
+where a 50 Hz control loop would rather lose a message than block on an
+acknowledgement.
+
+That default has a consequence a consumer must not miss: **QoS 0 messages are
+never queued for an offline session**, at all, regardless of whether a
+subscription exists for them. A publish at QoS 0 is transported to whoever is
+listening *right now* and nowhere else — it bypasses durable capture entirely,
+by construction, not by a bug. A caller that needs a published event to
+survive being captured by a drain must publish it at QoS 1.
 
 ## Network posture
 
