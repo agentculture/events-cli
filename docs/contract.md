@@ -344,6 +344,34 @@ concrete consequences:
   drained — a view over what was captured, never a claim that every event
   ever published is in it. Consumers must not read it as a complete log.
 
+## A payload that is not an envelope is dropped, permanently
+
+If a message arrives on a contract-lane topic and does not parse as a valid
+envelope, the drain **acknowledges it and discards it**. It is counted, its
+topic and a truncated reason are reported in the drain result's `skipped` list,
+and a warning is logged — but **the bytes are gone**. There is no dead-letter
+queue, and no way to recover the payload afterwards.
+
+This is deliberate, and the alternative is worse. Leaving it unacknowledged
+would make it a poison pill: MQTT redelivers an unacknowledged QoS 1 message
+forever, so it would consume part of *every* later drain's `--max` for as long
+as the subscription lives, and at the broker's inflight limit it would
+eventually block every message queued behind it. One bad publish would take the
+subscription down.
+
+**What this means if you publish to the contract lane:** validate before you
+publish. `events emit` does this for you — it rejects an invalid envelope with
+field-level errors and publishes nothing. If you publish directly with
+`EventClient`, build your envelope through `events_cli.core.Envelope` rather
+than hand-writing JSON, and treat a `skipped` entry appearing in a consumer's
+drain as a producer bug to fix at the source.
+
+The asymmetry is worth knowing, because it is the opposite decision to the one
+made for store failures: a bad payload is acknowledged because the fault is in
+the *message* and will never parse, whereas a failure to write to the history
+store leaves the message **unacknowledged** so the broker redelivers it — that
+fault is in the *store*, and it heals when an operator fixes it.
+
 ## The QoS trap: `publish()` still defaults to QoS 0 — `publish_event()` no longer does
 
 `EventClient.publish()` — the raw lane `reachy-mini-cli`'s 50 Hz control loop

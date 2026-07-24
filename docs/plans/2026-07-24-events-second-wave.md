@@ -30,7 +30,7 @@ slug: `events-second-wave` · status: `exported` · from frame: `events-second-w
 
 ### t4 — Canonical topic mapping module: type-to-topic and pattern-to-filter, pure
 
-- instruction: New stdlib-only module events_cli/core/topics.py: type_to_topic (task.requested -> events/task/requested), topic_to_type (inverse), pattern_to_filter (task.* -> events/task/+; '*' matches exactly one dotted segment); reuse core.envelope's type validation for segments; raw MQTT filter chars in a pattern raise the core FieldError shape; tests/test_topics.py dockerless including the reachy/# exclusion proof
+- instruction: New stdlib-only module events_cli/core/topics.py: type_to_topic (task.requested -> events/task/requested), topic_to_type (inverse), pattern_to_filter (`task.*` -> `events/task/+`; `*` matches exactly one dotted segment); reuse core.envelope's type validation for segments; raw MQTT filter chars in a pattern raise the core FieldError shape; tests/test_topics.py dockerless including the reachy/# exclusion proof
 - covers: c20, h5
 - acceptance:
   - events_cli/core/topics.py maps task.requested -> events/task/requested and compiles task.* -> events/task/+ with documented wildcard semantics; topic-to-type round-trips; a test proves reachy/# and reachy/state/# are never matched by contract-lane filters; stdlib-only, tests dockerless
@@ -84,7 +84,7 @@ slug: `events-second-wave` · status: `exported` · from frame: `events-second-w
 - depends on: t9
 - covers: c19, c27
 - acceptance:
-  - emit <type> --data <file|-> validates via the core envelope (generated id/time) and publishes QoS 1 to the canonical topic via EventClient, rejecting an invalid envelope with field-level errors before any publish; get <event-id> and list --type --max read drained history from the store; all three carry catalog entries and --json
+  - emit `<type>` --data <file|-> validates via the core envelope (generated id/time) and publishes QoS 1 to the canonical topic via EventClient, rejecting an invalid envelope with field-level errors before any publish; get `<event-id>` and list --type --max read drained history from the store; all three carry catalog entries and --json
   - EventClient.publish_event defaults to qos=1 (behaviour change per resolved q3: CHANGELOG-noted, regression-tested; reachy's publish() raw lane unaffected); 'events emit' asserts qos=1; client docstrings state QoS 0 bypasses durable capture
 
 ### t11 — Template and contract docs: backlog bound and the consume side

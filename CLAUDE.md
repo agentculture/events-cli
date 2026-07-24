@@ -26,23 +26,29 @@ can be replaced later without changing how participants interact.
 
 ### Read this before you build anything
 
-**The first vertical slice is built; the data plane's later arcs are not.** What
-began as the agent-first CLI scaffold inherited from `culture-agent-template`
-(identity, introspection verbs, CI, packaging) now also carries the event
-fabric's first slice:
+**Two arcs are built — publish and consume. The rest of the data plane is
+not.** What began as the agent-first CLI scaffold inherited from
+`culture-agent-template` (identity, introspection verbs, CI, packaging) now
+carries the event fabric's first two waves:
 
 - a pure **CloudEvents envelope core** (`events_cli/core/`) — stdlib only, no
-  broker and no Docker;
+  broker and no Docker — which also owns the **canonical topic mapping**
+  (`core/topics.py`) and **identity resolution** (`core/identity.py`);
 - an **importable publish client** (`events_cli/client.py`, `EventClient`) on
-  `paho-mqtt`, now a base dependency imported lazily; and
+  `paho-mqtt`, now a base dependency imported lazily;
 - the **stack verbs** (`events init/up/status/logs/down`) that generate and run a
-  loopback-only Dockerised Mosquitto.
+  loopback-only Dockerised Mosquitto; and
+- the **consume side** (second wave): durable subscriptions as MQTT persistent
+  sessions (`events_cli/subs/`), an append-only **history store** with a
+  store-assigned cursor (`events_cli/history/`), and the verbs
+  `events sub add/list/show/remove`, `events watch`, `events emit`,
+  `events get`, `events list`.
 
-What is *not* built: the agentfront MCP/HTTP binding, durable subscriptions +
-history, and pipelines. Those are deferred arcs tracked in
+What is *not* built: the agentfront MCP/HTTP binding, and pipelines. Those are
+deferred arcs tracked in
 [#6–#10](https://github.com/agentculture/events-cli/issues) — see the
 [Roadmap](#roadmap). **Issue #1's pipeline acceptance criteria are explicitly not
-met by this slice.**
+met by either wave.**
 
 The domain is specified across three open issues, and they are the requirements
 baseline. Read them before starting work; they are not summarised anywhere else
@@ -112,7 +118,20 @@ events up                # start the broker (refuses a foreign broker on the por
 events status            # broker state + health (exits 1 when unhealthy)
 events logs              # tail the broker log (bounded --tail, no --follow)
 events down              # stop and remove the broker containers
+
+# event-plane verbs (the consume side — second wave)
+events sub add <name> <pattern>   # register a durable subscription (persistent session)
+events sub list|show|remove       # inspect / destroy one (remove --force if the broker is down)
+events watch <name>               # bounded cursor drain (--since/--max 100/--timeout 30)
+events emit <type> --data <file>  # validate an envelope, then publish it at QoS 1
+events get <event-id>             # one captured event from history
+events list --type <t>            # captured history, bounded by --max
 ```
+
+**There is deliberately no `events watch --follow`.** An unbounded stream hangs
+an agent turn, so every agent-facing verb carries non-infinite `--max` /
+`--timeout` defaults. A test asserts the flag does not exist, so re-adding it
+has to be a decision rather than an accident.
 
 Conventions, enforced by the agent-first rubric:
 
@@ -171,7 +190,8 @@ The three-way name split itself is pinned by
 `test_no_top_level_events_package_in_the_source_tree`.
 
 `whoami` parses `culture.yaml` with a hand-rolled line scanner
-(`events_cli/cli/_commands/whoami.py`) rather than PyYAML, deliberately: the
+(`events_cli/core/identity.py`, re-exported unchanged by
+`events_cli/cli/_commands/whoami.py`) rather than PyYAML, deliberately: the
 **introspection lane imports nothing third-party**, so it runs from a bare
 checkout even though `paho-mqtt` is now a base dependency (that import is
 confined to the client — see
@@ -183,8 +203,10 @@ and exits 0 there).
 
 ## The event core and the client
 
-The first slice added two runtime layers below the CLI. Both are pure or lazy
-enough that the introspection lane still imports nothing third-party.
+The first slice added two runtime layers below the CLI; the second wave added
+two more (`events_cli/history/` and `events_cli/subs/`, described under
+[The consume side](#the-consume-side)). All of them are pure or lazy enough
+that the introspection lane still imports nothing third-party.
 
 **The envelope core** (`events_cli/core/`) is the bottom layer and the stable
 public contract: an immutable, CloudEvents-compatible `Envelope`
@@ -201,6 +223,19 @@ lowercase-dotted (`task.requested` — wrong case is rejected, not normalised), 
 `source` must be an absolute URI (`agent://builder`). Events are facts, so the
 dataclass is frozen; delivery is at-least-once (QoS 1), so consumers **must**
 dedupe on `id`.
+
+The core also owns two things the consume side needs and that must not be
+reimplemented anywhere else. **`core/topics.py`** is the canonical mapping
+between a dotted `type` and an MQTT topic — `task.requested` ⇄
+`events/task/requested`, and a pattern `task.*` compiles to `events/task/+`.
+`*` stands for exactly one dotted segment and therefore compiles to MQTT's
+single-level `+`, **never** the multi-level `#`; raw `#`, `+` and `/` in a
+pattern are rejected, so a subscription filter can never escape the `events/`
+prefix and reach a producer-owned tree. It reuses the envelope's own type
+validation rather than a second grammar that could drift. **`core/identity.py`**
+is the `culture.yaml` scanner, which lives here rather than under
+`events_cli/cli/` because `subs/` resolves subscription owners with it and
+domain packages import nothing from the CLI lane.
 
 **The importable client** (`events_cli/client.py`, `EventClient`) is the
 producer lane the `reachy-mini-cli` 50 Hz control loop binds to (#3).
@@ -270,6 +305,65 @@ guarantee:
 `up`/`logs`/`down` carry **non-infinite `--timeout` / `--tail` bounds** by policy;
 there is deliberately no `--follow` on `logs`, because an unbounded stream hangs
 an agent turn.
+
+## The consume side
+
+The second wave (#7) added the half of the fabric that reads. Three layers, each
+testable without a broker.
+
+**Durable subscriptions are MQTT persistent sessions, not a resident service.**
+`events sub add` registers a record *and* establishes a broker-side session
+(`clean_start=false`, QoS 1, session expiry effectively infinite), then
+disconnects leaving the session live. The broker's own persistence — `persistence
+true` plus the mounted volume — buffers the backlog while nothing is draining, so
+**no always-on control-service container ships**. A resident service becomes
+necessary only when pipelines need to advance runs actively (#8).
+
+*Load-bearing detail:* a subscription's identity in the broker **is** its MQTT
+client id, derived as a pure function of the name (`events-cli-sub-<name>`).
+It must be stable across processes and collision-free, or the session is
+silently lost — which is why it is deliberately *not* `EventClient`'s
+per-process-random id (that would mint a fresh empty session on every call).
+
+**The history store is bespoke, and that is a recorded exception.** #2's standing
+constraint is *do not build a store from scratch*; the evaluation in
+[`docs/decisions/2026-07-24-history-store-evaluation.md`](docs/decisions/2026-07-24-history-store-evaluation.md)
+rejected both siblings on evidence, because neither has a store-assigned
+monotonic sequence nor a bounded read-since-cursor — and the cursor **is** that
+sequence. It cannot be an event id: `evt_` ULIDs sort only to millisecond
+granularity with no intra-millisecond monotonicity. The log is append-only JSONL
+per subscription with a fixed-width index sidecar; **the index entry is the
+commit marker, written last**, so a reader takes no lock and still cannot see a
+half-written record.
+
+**The drain persists before it acknowledges — and reads back before that.**
+QoS 1 redelivers until acked, so acking first turns a crash into permanent loss
+while persisting first turns it into a redelivery the dedupe absorbs. The record
+is also read back *before* the ack, because a read-back failure after it would
+advance the store past an event no batch ever carried, on a broker told it was
+delivered. Both orderings are mutation-tested. The asymmetry to preserve: a
+**malformed payload is acked** (the fault is in the message, will never parse,
+and holding it back poisons the queue), a **failed read-back is not** (the fault
+is in the store, so redelivery self-heals).
+
+`events watch` composes two sources: it replays already-persisted history first
+(a pure disk read — if that fills `--max`, **no broker session is opened at
+all**), then drains the broker for the remaining budget, floored at the history
+page's own cursor so a redelivery cannot return an already-replayed event.
+
+**What history does *not* capture.** Only what a *registered subscription's*
+session queued. Events published before a subscription exists, or published at
+**QoS 0** — which is never queued for an offline session — are transported but
+never captured. `EventClient.publish()` still defaults to `qos=0` for the raw
+lane; `publish_event()` defaults to `qos=1` precisely so envelope publishers do
+not fall into that trap silently.
+
+**The broker address is resolved in one place** (`events_cli/address.py`), with
+`EVENTS_BROKER_HOST` / `EVENTS_BROKER_PORT` overriding the `127.0.0.1:1883`
+default — the same env-override shape as `EVENTS_STACK_DIR` and
+`EVENTS_HISTORY_DIR`. A malformed port is **fatal**, never a silent fallback to
+1883, because that fallback is the exact accident the override exists to
+prevent.
 
 ## Design constraints (decide these before the data plane)
 
@@ -399,11 +493,11 @@ because the resemblance will otherwise be assumed.
 
 ```bash
 uv sync
-uv run pytest -n auto                  # default selection (260 tests today)
+uv run pytest -n auto                  # default selection (744 tests today)
 uv run pytest tests/test_cli.py -v     # one file
 uv run pytest -k whoami -v             # one test / pattern
 uv run pytest -n auto --cov=events_cli --cov-report=term   # with coverage
-uv run pytest -m stack                 # broker/docker integration (needs a stack)
+uv run pytest -m stack                 # broker/docker integration (needs docker; 13 tests)
 uv run pytest -m perf                  # the enqueue-latency bound
 ```
 
@@ -434,13 +528,26 @@ straight from a checkout without `uv sync`, useful when the network is
 unavailable:
 
 ```bash
-PYTHONPATH=. python3 -m events_cli doctor
-PYTHONPATH=. python3 -m pytest tests -q
+PYTHONPATH=. python3 -m events_cli doctor      # and whoami / learn / explain / overview
+PYTHONPATH=. python3 -m events_cli --help
 ```
 
-A CI test exercises those verbs from a tree where paho is **not** installed, so
-the no-install lane is proven per PR rather than assumed. Anything that actually
-constructs an `EventClient` does need paho present.
+**The *verbs* run bare; the *test suite* does not, and this file used to imply
+otherwise.** `PYTHONPATH=. python3 -m pytest tests -q` has never passed on a
+bare checkout since paho became a base dependency — every module that
+constructs an `EventClient`, a session or a drain imports it, so those tests
+fail with `MqttDependencyError` rather than skipping. Run the suite with
+`uv run pytest` and use the bare lane for the verbs it actually covers.
+
+The guarantee itself is real and mechanically enforced, just narrower than the
+old wording: `test_introspection_verbs_run_with_paho_absent`,
+`test_introspection_path_never_imports_paho`,
+`test_subs_never_imports_paho_at_module_scope`,
+`test_importing_the_subs_package_never_imports_paho` and
+`test_the_registry_lane_works_with_paho_absent` all run in the **default** CI
+selection with paho blocked, so the no-install lane is proven per PR rather than
+assumed. `events get` / `events list` are covered too — they read the store and
+need no MQTT client at all.
 
 ## Conventions
 
@@ -542,11 +649,25 @@ events_cli/               agent-first CLI (cited from agentfront's python-cli re
   cli/_errors.py          CliError + exit-code policy  (stable-contract)
   cli/_commands/          one module per verb; each exposes register(sub)
     stack.py              init/up/status/logs/down -> StackError to CliError
+    sub.py, watch.py      subscriptions + the bounded cursor drain
+    emit.py, get.py, list.py   publish an envelope; read captured history
   explain/catalog.py      markdown keyed by command-path tuple
   core/                   the envelope contract — stdlib only, no broker, no docker
     envelope.py           immutable CloudEvents-compatible Envelope + validation
     errors.py             EventsError / EnvelopeValidationError / FieldError
+    topics.py             dotted type <-> MQTT topic; pattern -> filter
+    identity.py           the culture.yaml scanner (owner resolution)
+  address.py              the one definition of the broker address + env override
   client.py               EventClient — importable publisher (lazy paho import)
+  history/                the append-only history log and its cursor
+    __init__.py           HistoryStore — the seam a backend plugs into
+    jsonl.py              JSONL log + index sidecar (the index entry is the commit marker)
+    backend.py            HistoryRecord / HistoryPage / the backend Protocol
+  subs/                   durable subscriptions as MQTT persistent sessions
+    record.py             the registry record (name/pattern/owner/clientId)
+    registry.py           one JSON file per subscription, atomic create
+    session.py            PersistentSession — the connect-with-session seam
+    drain.py              persist -> read back -> ack, bounded, returns a cursor
   stack/                  the Dockerised Mosquitto deployment
     templates/            compose.yaml + mosquitto.conf, shipped verbatim
     _docker.py            the single `docker compose` invocation seam
@@ -555,8 +676,10 @@ events_cli/               agent-first CLI (cited from agentfront's python-cli re
 tests/                    pytest suite; `perf` and `stack` markers excluded by default
 .claude/skills/           vendored guildmaster skill kit (cite-don't-import)
 docs/contract.md          the consumer-facing event contract
+docs/decisions/           recorded decisions (e.g. why the history store is bespoke)
+docs/acceptance/          executed live-run records, one per arc
 docs/skill-sources.md     skill provenance ledger
-docs/specs/, docs/plans/  the devague spec and plan for the first slice
+docs/specs/, docs/plans/  the devague specs and plans, one pair per arc
 culture.yaml              mesh identity (suffix + backend)
 .github/workflows/        tests.yml (test/lint/version-check), publish.yml (PyPI)
 ```
@@ -573,33 +696,57 @@ culture.yaml              mesh identity (suffix + backend)
    `eclipse-mosquitto:2.1.2-alpine` with `127.0.0.1:1883:1883`, `persistence true` +
    volume, and a foreign-broker preflight (`events_cli/stack/`).
 
+**Shipped in the second wave** ([#7](https://github.com/agentculture/events-cli/issues/7)):
+
+1. **Durable subscriptions** — MQTT persistent sessions plus a registry
+   (`events_cli/subs/`), owner-attributed and forward-compatible with #10.
+2. **History + cursor drain** — an append-only log with a store-assigned
+   sequence (`events_cli/history/`), drained by `events watch --since/--max/
+   --timeout`.
+3. **The event-plane verbs** — `sub`, `watch`, `emit`, `get`, `list`, plus the
+   `EVENTS_BROKER_HOST`/`PORT` override (`events_cli/address.py`).
+
+Verified live on spark-f8a9 in a 1m46s service window, 12/12 —
+[`docs/acceptance/2026-07-24-second-wave-live-run.md`](docs/acceptance/2026-07-24-second-wave-live-run.md).
+
 **Deferred, each tracked as its own arc.** These carry a confirmed spec contract
 recorded on the issue itself, so the requirement outlives the frame state:
 
 | Issue | Arc |
 |-------|-----|
 | [#6](https://github.com/agentculture/events-cli/issues/6) | **agentfront binding** — one App registry fed from the core, deriving MCP (behind `[mcp]`) + HTTP, with `assert_surfaces_agree` and CLI parity tests. |
-| [#7](https://github.com/agentculture/events-cli/issues/7) | **Durable subscriptions + cursor drain**, designed together with history; non-infinite `--max`/`--timeout` everywhere. |
 | [#8](https://github.com/agentculture/events-cli/issues/8) | **Pipelines** — apply/list/show/run/inspect over the event graph. |
-| [#9](https://github.com/agentculture/events-cli/issues/9) | **`shell-cli` routing** for `events up`, once shell-cli is more than scaffold. |
-| [#10](https://github.com/agentculture/events-cli/issues/10) | **dynsec identities + topic ACLs**, and the documented remote-access opt-in. |
+| [#9](https://github.com/agentculture/events-cli/issues/9) | **`shell-cli` routing** for `events up` — **evaluated 2026-07-24 and declined for now**, with the verdict and four named reopen triggers recorded on the issue. The likeliest trigger is #10, whose `mosquitto_ctrl dynsec` calls take user-supplied identity names and so are the first genuinely non-fixed argv here. |
+| [#10](https://github.com/agentculture/events-cli/issues/10) | **dynsec identities + topic ACLs**, and the documented remote-access opt-in. The generated `mosquitto.conf` still carries `allow_anonymous true`, and its own comment binds removing that line to this arc landing. |
 
-**Issue #1's pipeline acceptance criteria are explicitly *not* met by this
-slice** — that is a deliberate, recorded scope decision (q4), not an oversight.
+**Issue #1's pipeline acceptance criteria are explicitly *not* met by either
+wave** — that is a deliberate, recorded scope decision (q4), not an oversight.
 
 ## Known drift
 
 Real, checked-in inconsistency. Fixing it is a normal PR (bump the version).
 
-**None outstanding today.** The one entry this section used to carry —
-**`teken` → `agentfront`** — is **resolved**: the dev dependency is now
-`agentfront>=0.20`, `uv.lock` resolves it, CI runs
-`uv run agentfront cli doctor . --strict`, and the stale references in
-`docs/skill-sources.md`, `.claude/skills.local.yaml.example` and
-`.markdownlint-cli2.yaml` (now `.agentfront/**`) were swept with it. No live
-config, CI step or dependency names the old package any more; the only surviving
-mentions are historical — `CHANGELOG.md`, the archived spec/plan under `docs/`,
-and this paragraph.
+**None outstanding today.** Two entries were closed at the second wave's close
+and are recorded here because both had been quietly wrong for a while:
+
+- **`teken` → `agentfront`** — resolved during the first slice. No live config,
+  CI step or dependency names the old package; surviving mentions are historical
+  (`CHANGELOG.md`, archived specs).
+- **The no-install test-suite claim** — this file advertised
+  `PYTHONPATH=. python3 -m pytest tests -q` as part of the bare-checkout lane.
+  That has been false since `paho-mqtt` became a base dependency in the first
+  slice: paho-dependent test modules fail rather than skip. Three separate
+  agents tripped over it during the second wave before it was corrected. The
+  underlying guarantee was real all along — it was the advertised *command* that
+  overstated it — so [Development](#development) now documents the verbs that do
+  run bare and names the five CI tests that enforce it.
+
+Known **gaps** — behaviours that are correct and deliberate but incomplete —
+live with their arcs rather than here: mid-drain takeover is not detected (a
+kicked drainer returns a partial batch and burns its timeout rather than raising
+a named error), `has_more` under-reports rather than over-reports, and a batch
+may legitimately repeat an event under takeover even though the *store* holds it
+exactly once.
 
 Add an entry here the moment prose and code diverge again — an empty section is a
 claim, so do not leave a stale warning standing in place of one.
