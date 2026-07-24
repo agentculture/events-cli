@@ -22,9 +22,11 @@ call the API, and an agent or a human can publish and subscribe to events the
 same way. Mosquitto transports events; this tool defines what they mean — typed
 immutable envelopes, correlation and causation, durable history, pipeline runs.
 
-Status: the event and broker surface is NOT implemented yet. What ships today is
-the agent-first CLI below — identity and introspection. See the repository
-issues for the specification being built against.
+Status: the broker stack is implemented — init/up/status/logs/down operate a
+Dockerised Mosquitto deployment published on 127.0.0.1:1883 and nowhere else.
+The event contract on top of it (typed envelopes, correlation and causation,
+durable history, pipelines) is NOT implemented yet. See the repository issues
+for the specification being built against.
 
 Commands
 --------
@@ -34,6 +36,12 @@ Commands
   events overview           Descriptive snapshot of the agent.
   events doctor             Check the agent-identity invariants.
   events cli overview       Describe the CLI surface itself.
+
+  events init               Generate the broker stack (compose + mosquitto.conf).
+  events up                 Start the broker. Refuses if another one holds 1883.
+  events status             Broker state and health. Exits 1 when unhealthy.
+  events logs               Last N lines of the broker log (no --follow).
+  events down               Stop and remove the broker.
 
 Machine-readable output
 -----------------------
@@ -63,8 +71,8 @@ def _as_json_payload() -> dict[str, object]:
         "version": __version__,
         "purpose": (
             "The AgentCulture event fabric: a Dockerised Mosquitto MQTT broker fronted "
-            "as a CLI, an HTTP API and an MCP surface. The event and broker surface is "
-            "not implemented yet; today's verbs are identity and introspection only."
+            "as a CLI, an HTTP API and an MCP surface. The broker stack is implemented; "
+            "the event contract on top of it (envelopes, history, pipelines) is not."
         ),
         "commands": [
             {"path": ["whoami"], "summary": "Identity probe from culture.yaml."},
@@ -73,6 +81,11 @@ def _as_json_payload() -> dict[str, object]:
             {"path": ["overview"], "summary": "Descriptive snapshot of the agent."},
             {"path": ["doctor"], "summary": "Check the agent-identity invariants."},
             {"path": ["cli", "overview"], "summary": "Describe the CLI surface."},
+            {"path": ["init"], "summary": "Generate the loopback-only broker stack."},
+            {"path": ["up"], "summary": "Start the broker; refuses on a foreign one."},
+            {"path": ["status"], "summary": "Broker state and health."},
+            {"path": ["logs"], "summary": "Last N lines of the broker log."},
+            {"path": ["down"], "summary": "Stop and remove the broker."},
         ],
         "exit_codes": {
             "0": "success",

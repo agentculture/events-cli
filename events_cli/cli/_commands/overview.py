@@ -30,6 +30,11 @@ _VERBS = [
     "explain <path> — markdown docs for a topic",
     "overview — this descriptive snapshot",
     "doctor — check the agent-identity invariants",
+    "init — generate the loopback-only broker stack",
+    "up — start the broker (refuses if another one holds the port)",
+    "status — broker state and health",
+    "logs — the last N lines of the broker log",
+    "down — stop and remove the broker",
 ]
 
 

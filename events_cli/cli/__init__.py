@@ -68,6 +68,7 @@ def _build_parser() -> argparse.ArgumentParser:
     from events_cli.cli._commands import explain as _explain_cmd
     from events_cli.cli._commands import learn as _learn_cmd
     from events_cli.cli._commands import overview as _overview_cmd
+    from events_cli.cli._commands import stack as _stack_group
     from events_cli.cli._commands import whoami as _whoami_cmd
 
     parser = _CliArgumentParser(
@@ -94,6 +95,11 @@ def _build_parser() -> argparse.ArgumentParser:
     _overview_cmd.register(sub)
     _doctor_cmd.register(sub)
     _cli_group.register(sub)
+    # The broker stack verbs (init/up/status/logs/down) all come from one
+    # module: they share a stack directory, a preflight and a docker seam, and
+    # splitting them per-file would scatter that. They register at the top level
+    # rather than under a `stack` noun because the contract names `events up`.
+    _stack_group.register(sub)
     # Register your own noun groups here:
     #   from events_cli.cli._commands import my_noun as _my_noun_group
     #   _my_noun_group.register(sub)
