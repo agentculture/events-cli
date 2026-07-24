@@ -722,14 +722,25 @@ def test_a_store_that_cannot_read_back_what_it_just_wrote_is_a_named_error(
 def test_a_store_whose_read_path_is_broken_is_a_named_error_not_a_traceback(
     registry: SubscriptionRegistry, store: HistoryStore
 ) -> None:
-    """The event is already stored and acked here; only the batch is lost."""
+    """The event is stored but NOT acknowledged, so the broker redelivers it.
+
+    Acking here would advance the store's sequence past an event that no batch
+    ever carried, while telling the broker it was delivered — the one state
+    from which neither the drain nor a redelivery can recover it. Leaving it
+    unacknowledged costs only a redelivery, which the store dedupes back onto
+    the same sequence, and the drain self-heals once the store is readable.
+
+    Deliberately the opposite of the malformed-payload policy: that case acks
+    because the fault is in the *message* and will never parse; this one holds
+    back because the fault is in the *store*.
+    """
     factory = fake_drain_factory(session_present=True, deliveries=(message(event(1), 1),))
 
     with pytest.raises(DrainError) as excinfo:
         drain(registry, JournalStore(store, [], unreadable=True), factory, max=1)
 
     assert "read back" in str(excinfo.value)
-    assert factory.made[0].acks == [(1, QOS_AT_LEAST_ONCE)]
+    assert factory.made[0].acks == []
 
 
 def test_the_deadline_is_rechecked_between_messages_so_a_slow_store_cannot_overrun_it(

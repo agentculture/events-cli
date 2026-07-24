@@ -21,10 +21,15 @@ consequence is asymmetric, which is why the order is not a preference:
 So every message is persisted and *then* acknowledged, one at a time, on the
 caller's thread. Not batched at the end — a batch of acknowledgements is the
 first failure mode wearing a different hat: everything delivered since the last
-flush is lost if the process dies mid-batch. The acknowledgement follows the
-append as immediately as possible (the record is read back afterwards, because
-reading back is presentation, not durability), so the window in which a
-redelivery is possible stays as small as the store's write.
+flush is lost if the process dies mid-batch.
+
+The record is also read back *before* the acknowledgement, not after. Reading
+back is presentation rather than durability, so it is tempting to do it last —
+but a read-back that fails after the ack would leave the store's sequence
+advanced past an event no batch ever carried, on a broker that has been told it
+was delivered. That is the same unrecoverable corner as acknowledging first,
+reached by a longer road. Ordering it before the ack turns it into a
+redelivery instead, which the dedupe absorbs.
 
 This is also what makes an MQTT session takeover *lossless* rather than merely
 loud: a drainer that is kicked off mid-batch may never have acknowledged what it
@@ -352,10 +357,25 @@ def _consume(
             continue
 
         seq = _persist(store, envelope, record.name)
+        # Read back BEFORE acknowledging. A read-back failure must leave the
+        # message unacknowledged so the broker redelivers it: acking first
+        # would advance the store's sequence past an event no batch ever
+        # carried, while telling the broker it was delivered — the one state
+        # neither a retry nor a redelivery can recover from. Redelivery costs
+        # nothing here, because the store dedupes on id and hands back the
+        # same sequence.
+        #
+        # This is the opposite of the malformed-payload case above, and for a
+        # reason worth keeping: a bad payload is a property of the *message*
+        # and will never parse, so holding it back poisons the queue. A failed
+        # read-back is a property of the *store* — an IO fault an operator
+        # fixes — so holding the message back is exactly right, and the drain
+        # self-heals once the store is readable again.
+        row = _read_back(store, record.name, seq)
         client.ack(message.mid, message.qos)
         if seq > cursor:
             cursor = seq
-        records.append(_read_back(store, record.name, seq))
+        records.append(row)
 
     stopped = STOPPED_MAX if consumed >= max else STOPPED_TIMEOUT
     return DrainResult(
