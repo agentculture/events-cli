@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import shlex
+import sys
 from pathlib import Path
 from typing import Sequence
 
@@ -421,6 +422,37 @@ def test_status_accepts_ndjson_and_array_ps_output(
     docker.respond("ps", stdout=f"{_ps_row()}\n")
     assert main(["status", "--dir", str(stack), "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["healthy"] is True
+
+
+# --- the real subprocess seam ----------------------------------------------
+
+
+def test_undecodable_output_does_not_raise_out_of_the_docker_seam() -> None:
+    """Docker output that is not valid UTF-8 must not blow up the seam.
+
+    Bare ``text=True`` decodes strictly with the locale's encoding, so one bad
+    byte would raise ``UnicodeDecodeError`` from inside ``run()`` — escaping the
+    StackError translation and reaching the user as an "unexpected" error with
+    the wrong exit code. ``events logs`` pipes the broker's container log
+    through this path, so the bytes really are arbitrary.
+
+    Runs a tiny Python program instead of docker: the seam's argv is not
+    docker-specific, and this keeps the test in the dockerless default suite.
+    """
+    from events_cli.stack._docker import run
+
+    result = run(
+        [
+            sys.executable,
+            "-c",
+            # A lone 0xFF is invalid UTF-8 in any position.
+            "import sys; sys.stdout.buffer.write(b'ok \\xff done'); sys.exit(3)",
+        ],
+        timeout=30,
+    )
+    assert result.returncode == 3, "the exit code must survive the bad byte"
+    assert "ok " in result.stdout and "done" in result.stdout
+    assert "�" in result.stdout, "the undecodable byte becomes U+FFFD, not an exception"
 
 
 # --- the reproduce-it-yourself remediation string ---------------------------

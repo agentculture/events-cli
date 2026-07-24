@@ -105,13 +105,25 @@ def run(argv: Sequence[str], *, timeout: int = DEFAULT_TIMEOUT) -> CommandResult
     means. A missing binary or a blown timeout are environment failures and do
     raise, as :class:`DockerUnavailable` / :class:`DockerTimeout`, so no
     ``FileNotFoundError`` traceback can escape to stderr.
+
+    **Decoding is explicit and lossy on purpose.** Bare ``text=True`` decodes
+    with the process's preferred encoding under *strict* errors, so a byte
+    docker emits that the locale cannot represent raises ``UnicodeDecodeError``
+    from inside this function — escaping the ``StackError`` translation and
+    surfacing as an "unexpected" failure with the wrong exit code and no
+    remediation. That is not hypothetical for ``events logs``, which pipes the
+    broker's container log through here: those bytes are arbitrary, and a
+    C/POSIX-locale host makes the strict decode narrow. ``errors="replace"``
+    turns an undecodable byte into U+FFFD in a diagnostic string, which is
+    always better than losing the exit code it came with.
     """
     argv = list(argv)
     try:
         proc = subprocess.run(  # nosec B603 - fixed argv, shell=False, bounded timeout
             argv,
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             check=False,
         )
@@ -120,7 +132,7 @@ def run(argv: Sequence[str], *, timeout: int = DEFAULT_TIMEOUT) -> CommandResult
     except PermissionError as exc:
         raise DockerUnavailable(f"{DOCKER_BIN} is not executable: {exc}") from exc
     except subprocess.TimeoutExpired as exc:
-        raise DockerTimeout(f"timed out after {timeout}s: {' '.join(argv)}") from exc
+        raise DockerTimeout(f"timed out after {timeout}s: {shlex.join(argv)}") from exc
     return CommandResult(tuple(argv), proc.returncode, proc.stdout or "", proc.stderr or "")
 
 
