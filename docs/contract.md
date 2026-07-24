@@ -37,15 +37,17 @@ decided design constraint with an issue, not a shipped behaviour.
 | Stack verbs — `events init` / `up` / `status` / `logs` / `down` | built (first slice) |
 | agentfront-derived MCP and HTTP surfaces | not built — [#6](https://github.com/agentculture/events-cli/issues/6) |
 | Durable subscriptions + cursor drain — registry, MQTT persistent sessions, history store, `events sub add/list/show/remove`, `events watch` | built (second wave) |
-| Event history reads — `events emit` / `get` / `list` | not built — [#7](https://github.com/agentculture/events-cli/issues/7) |
+| Event history reads — `events emit` / `get` / `list` | built (second wave) |
 | Pipelines — apply / list / show / run / inspect | not built — [#8](https://github.com/agentculture/events-cli/issues/8) |
 | `events up` routed through `shell-cli` confinement | not built — [#9](https://github.com/agentculture/events-cli/issues/9) |
 | dynsec identities, topic ACLs, documented remote opt-in | not built — [#10](https://github.com/agentculture/events-cli/issues/10) |
 
-There is no `events emit` or `events pipeline` verb yet. `events sub` and
-`events watch` shipped in the second wave; publishing still happens through
-the importable client or straight over MQTT, and #1's pipeline acceptance
-criteria remain explicitly **not** met.
+`events emit`, `events get` and `events list` shipped alongside `events sub`
+and `events watch` in the second wave: `emit` validates an envelope through
+the core and publishes it QoS 1 to its canonical topic, and `get`/`list` read
+back whatever a registered subscription's drain actually captured. There is
+still no `events pipeline` verb, and #1's pipeline acceptance criteria remain
+explicitly **not** met.
 
 ## Lane boundary: culture carries conversation, events-cli carries events
 
@@ -201,12 +203,11 @@ any producer of retained state should carry an equivalent, because without one
 Durable history — replay from a cursor, surviving a stack restart — is a
 different mechanism living in the control service's own store, deliberately
 built together with durable subscriptions rather than bolted on afterwards.
-The store, the registry and the bounded drain are built, and `events sub` /
+The store, the registry and the bounded drain are built, `events sub` /
 `events watch` are the CLI surface over them (see
-[below](#the-consume-side-cursor-drain-single-drainer-and-the-capture-boundary));
-reading captured history directly (`events get` / `events list`) is not built
-yet — [#7](https://github.com/agentculture/events-cli/issues/7). Nothing in
-this repo should be read as implying retained == history.
+[below](#the-consume-side-cursor-drain-single-drainer-and-the-capture-boundary)),
+and `events get` / `events list` now read captured history directly. Nothing
+in this repo should be read as implying retained == history.
 
 ## The canonical topic mapping
 
@@ -281,12 +282,15 @@ cursor-drain semantics below.
 
 The subscription registry, the MQTT persistent-session lifecycle, the history
 store and the bounded drain engine are **built** (`events_cli/subs/`,
-`events_cli/history/`), and the CLI surface over them —
-`events sub add/list/show/remove` and `events watch` — shipped in the second
-wave alongside this document's update. What is **not** built yet is the direct
-history-read surface: `events emit` (a CLI-side publish verb), `events get` and
-`events list` remain [#7](https://github.com/agentculture/events-cli/issues/7).
-Everything below is the confirmed contract this arc satisfies, not a proposal.
+`events_cli/history/`), and the CLI surface over them — `events sub
+add/list/show/remove`, `events watch`, and the direct history-read surface
+`events emit` / `events get` / `events list` — all shipped in the second wave.
+`events emit <type> --data <file|->` validates an envelope through the core
+(generating `id`/`time`), publishes it QoS 1 to its canonical topic via
+`EventClient`, and prints the resulting `PublishResult`; `events get
+<event-id>` and `events list --type <t> --max N` read back whatever a
+registered subscription's drain actually captured. Everything below is the
+confirmed contract this arc satisfies, not a proposal.
 
 **Cursor-drain semantics.** A long-lived MQTT subscription blocks a request in
 every request/response surface — an MCP tool call, an HTTP request — and the
@@ -336,25 +340,32 @@ concrete consequences:
 - There is **no global capture** of contract-lane traffic — only what a
   registered subscription's session actually queued is ever captured; nothing
   published to `events/…` is captured for a topic nobody has subscribed to
-  yet. Once `events list` ships ([#7](https://github.com/agentculture/events-cli/issues/7)),
-  it is designed to read only what registered subscriptions actually drained —
-  a view over what was captured, never a claim that every event ever published
-  is in it. Consumers must not read it as a complete log.
+  yet. `events list` reads only what registered subscriptions actually
+  drained — a view over what was captured, never a claim that every event
+  ever published is in it. Consumers must not read it as a complete log.
 
-## The QoS trap: `publish()` defaults to QoS 0
+## The QoS trap: `publish()` still defaults to QoS 0 — `publish_event()` no longer does
 
-`EventClient.publish()` and `publish_event()` (`events_cli/client.py`) both
-default to `qos=0` today — correct for the raw, co-located,
+`EventClient.publish()` — the raw lane `reachy-mini-cli`'s 50 Hz control loop
+binds to — still defaults to `qos=0`, correct for the co-located,
 drop-don't-block lane [described above](#the-raw-mqtt-port-is-first-class),
-where a 50 Hz control loop would rather lose a message than block on an
-acknowledgement.
+where a real-time loop would rather lose a message than block on an
+acknowledgement. **`publish_event()` no longer shares that default**: since
+`0.10.0` it defaults to `qos=1` — a deliberate behaviour change on an
+already-published wheel (see `CHANGELOG.md`) — because an envelope published
+at QoS 0 is never queued for an offline persistent session at all, exactly the
+trap this section is named for, and `publish_event()` is the
+envelope-publishing call, not the raw one. `events emit` also passes `qos=1`
+explicitly, so a CLI-emitted event is always eligible for durable capture
+regardless of the client's own default.
 
-That default has a consequence a consumer must not miss: **QoS 0 messages are
-never queued for an offline session**, at all, regardless of whether a
-subscription exists for them. A publish at QoS 0 is transported to whoever is
-listening *right now* and nowhere else — it bypasses durable capture entirely,
-by construction, not by a bug. A caller that needs a published event to
-survive being captured by a drain must publish it at QoS 1.
+That default has a consequence a consumer must not miss whichever call they
+use: **QoS 0 messages are never queued for an offline session**, at all,
+regardless of whether a subscription exists for them. A publish at QoS 0 is
+transported to whoever is listening *right now* and nowhere else — it bypasses
+durable capture entirely, by construction, not by a bug. A caller that needs a
+published event to survive being captured by a drain must publish it at QoS
+1 — `publish_event()`'s new default, and always what `events emit` does.
 
 ## Network posture
 

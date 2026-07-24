@@ -7,9 +7,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.10.0] - 2026-07-24
 
+### Added
+
+- **`events emit <type> --data <file|->`** — validates an envelope through the core (generating `id`/`time`, with `type` as the positional and `--data` supplying only the event's `data` payload — a file path or `-` for stdin, never a whole envelope), then publishes it QoS 1 to its canonical topic (`events_cli/core/topics.py`) via `EventClient`. An invalid envelope is rejected with every field-level reason in one pass and **nothing is published**; a valid envelope is always published at QoS 1, never a flag, so a CLI-emitted event is always eligible for durable capture. `--correlation-id`/`--causation-id`/`--run-id` set the envelope's tracing fields. A broker-down publish is an environment fault (exit 2), and the event/topic/`PublishResult` are still printed either way.
+- **`events get <event-id>`** and **`events list [--type T] [--max N]`** — read captured history straight from the store (`events_cli/history/`), read-only and dockerless: neither imports `events_cli.client`, so both run with no MQTT client installed. `get` on an unknown id and `list --max 0` are user errors (exit 1); a damaged store record is an environment fault (exit 2). Both carry `--json` and an `events explain` catalog entry.
+
 ### Changed
 
 - `[project] description` no longer claims an HTTP API or an MCP surface. Both are the deferred agentfront binding ([#6](https://github.com/agentculture/events-cli/issues/6)), not shipped code, so the package's own PyPI-facing summary was prose ahead of the repository — the exact drift `CLAUDE.md`'s Known-drift rule exists to catch. It now names what is built: the envelope core, the importable client, and the stack verbs.
+- **`EventClient.publish_event` now defaults to `qos=1`, not `qos=0` — a behaviour change on an already-published wheel.** An envelope published at QoS 0 is never queued for an offline persistent session at all, so it silently bypassed durable capture (`events_cli/history`) regardless of whether a subscription existed — exactly the trap this arc's consume side exists to close. Only the envelope-publishing lane changes: `EventClient.publish()` (the raw lane `reachy-mini-cli`'s 50 Hz control loop binds to with an explicit `qos=0`) keeps its `qos=0` default and is untouched. Callers relying on the old `publish_event` default now get QoS 1 by default; pass `qos=0` explicitly to keep the previous behaviour. `docs/contract.md` and the `client.py` docstrings both state that a QoS 0 publish bypasses durable capture.
 
 ## [0.9.0] - 2026-07-24
 
