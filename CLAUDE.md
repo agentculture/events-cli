@@ -500,11 +500,11 @@ because the resemblance will otherwise be assumed.
 
 ```bash
 uv sync
-uv run pytest -n auto                  # default selection (744 tests today)
+uv run pytest -n auto                  # default selection (816 tests today)
 uv run pytest tests/test_cli.py -v     # one file
 uv run pytest -k whoami -v             # one test / pattern
 uv run pytest -n auto --cov=events_cli --cov-report=term   # with coverage
-uv run pytest -m stack                 # broker/docker integration (needs docker; 13 tests)
+uv run pytest -m stack                 # broker/docker integration (needs docker; 14 tests)
 uv run pytest -m perf                  # the enqueue-latency bound
 ```
 

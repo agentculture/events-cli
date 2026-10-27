@@ -427,7 +427,11 @@ publish. `events emit` does this for you — it rejects an invalid envelope with
 field-level errors and publishes nothing. If you publish directly with
 `EventClient`, build your envelope through `events_cli.core.Envelope` rather
 than hand-writing JSON, and treat a `skipped` entry appearing in a consumer's
-drain as a producer bug to fix at the source.
+drain as a producer bug to fix at the source — with one exception: a consumer
+still on events-cli 0.10.x skips every envelope that carries content marks,
+because it does not know those keys. That is the *reader* being behind, not a
+producer bug; upgrade the reader (see the reader-first rollout under content
+marks above).
 
 The asymmetry is worth knowing, because it is the opposite decision to the one
 made for store failures: a bad payload is acknowledged because the fault is in
