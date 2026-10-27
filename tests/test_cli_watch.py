@@ -400,3 +400,69 @@ def test_non_positive_timeout_is_rejected_before_touching_the_store(
     rc = main(["watch", "robot", "--timeout", "0"])
 
     assert rc == 1
+
+
+# --- content marks (#15) ----------------------------------------------------
+
+
+def _marked() -> Envelope:
+    return Envelope.new(
+        "task.requested",
+        "agent://builder",
+        visibility="public",
+        origin="ai",
+        fidelity="generated",
+        timestamps=[{"type": "generated", "at": "2026-07-24T10:00:00Z"}],
+    )
+
+
+def test_watch_text_line_for_an_unmarked_event_is_unchanged(
+    monkeypatch: pytest.MonkeyPatch, isolated_history: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    envelope = Envelope.new("task.requested", "agent://builder")
+    HistoryStore(isolated_history).append(envelope, "robot")
+    monkeypatch.setattr(watch_module, "drain_subscription", _poison_drain)
+
+    assert main(["watch", "robot", "--max", "1"]) == 0
+
+    assert f"  [1] task.requested  id={envelope.id}\n" in capsys.readouterr().out
+
+
+def test_watch_text_line_shows_marks(
+    monkeypatch: pytest.MonkeyPatch, isolated_history: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    envelope = _marked()
+    HistoryStore(isolated_history).append(envelope, "robot")
+    monkeypatch.setattr(watch_module, "drain_subscription", _poison_drain)
+
+    assert main(["watch", "robot", "--max", "1"]) == 0
+
+    assert (
+        f"  [1] task.requested  id={envelope.id}  [visibility=public origin=ai "
+        "fidelity=generated times=published,generated]\n"
+    ) in capsys.readouterr().out
+
+
+def test_watch_text_line_flags_an_unrecognised_mark(
+    monkeypatch: pytest.MonkeyPatch, isolated_history: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    wire = {**Envelope.new("task.requested", "agent://builder").to_dict(), "fidelity": "vibes"}
+    HistoryStore(isolated_history).append(Envelope.from_dict(wire), "robot")
+    monkeypatch.setattr(watch_module, "drain_subscription", _poison_drain)
+
+    assert main(["watch", "robot", "--max", "1"]) == 0
+
+    assert "fidelity=vibes(unrecognised)" in capsys.readouterr().out
+
+
+def test_watch_json_carries_marks_exactly_as_the_envelope_emits_them(
+    monkeypatch: pytest.MonkeyPatch, isolated_history: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    envelope = _marked()
+    HistoryStore(isolated_history).append(envelope, "robot")
+    monkeypatch.setattr(watch_module, "drain_subscription", _poison_drain)
+
+    assert main(["watch", "robot", "--max", "1", "--json"]) == 0
+
+    event = json.loads(capsys.readouterr().out)["records"][0]["event"]
+    assert event == envelope.to_dict()
