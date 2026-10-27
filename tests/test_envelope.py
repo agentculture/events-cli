@@ -27,13 +27,17 @@ import pytest
 from events_cli.core import (
     ERROR_CODES,
     EVENT_ID_PREFIX,
+    MARK_VOCABULARIES,
     REQUIRED_FIELDS,
     SCHEMA_VERSION,
+    TIMESTAMP_TYPES,
     WIRE_FIELD_NAMES,
     Envelope,
     EnvelopeValidationError,
     EventsError,
     FieldError,
+    Timestamp,
+    is_known_mark,
     new_event_id,
     new_id,
     now_rfc3339,
@@ -297,6 +301,12 @@ def test_wire_field_names_are_pinned() -> None:
         "traceparent": "traceparent",
         "producer": "producer",
         "delivery_attempt": "deliveryAttempt",
+        # Content marks (#15): who may see it, who made it, how it became what
+        # it is, and when each thing happened to it.
+        "visibility": "visibility",
+        "origin": "origin",
+        "fidelity": "fidelity",
+        "timestamps": "timestamps",
         "data": "data",
     }
 
@@ -840,3 +850,256 @@ def test_a_case_only_misspelling_still_gets_a_suggestion() -> None:
 def test_parse_rfc3339_rejects_a_non_string() -> None:
     with pytest.raises(ValueError):
         parse_rfc3339(20260723)  # type: ignore[arg-type]
+
+
+# --- content marks (#15): visibility, origin, fidelity, typed timestamps ----
+#
+# Write-strict, read-tolerant (frame envelope-content-marks, decision q1):
+# Envelope.new() refuses a mark value outside the closed vocabularies, while
+# from_dict() preserves it verbatim so a reader on an older vocabulary never
+# drops an event a newer producer marked. Shape is checked on both paths.
+
+MARKED_WIRE: dict[str, object] = {
+    **REFERENCE_WIRE,
+    "visibility": "private",
+    "origin": "human",
+    "fidelity": "transcribed",
+    "timestamps": [
+        {"type": "recorded", "at": "2026-10-27T09:00:00Z", "by": "client"},
+        {"type": "transcribed", "at": "2026-10-27T09:00:02.5Z"},
+    ],
+}
+
+
+def marked(**overrides: object) -> Envelope:
+    """A valid marked envelope minted through new(), with overrides applied."""
+    kwargs: dict[str, object] = {
+        "visibility": "private",
+        "origin": "human",
+        "fidelity": "transcribed",
+        "timestamps": [
+            {"type": "recorded", "at": "2026-10-27T09:00:00Z", "by": "client"},
+            Timestamp(type="transcribed", at="2026-10-27T09:00:02.5Z"),
+        ],
+    }
+    kwargs.update(overrides)
+    return Envelope.new("task.requested", "agent://builder", **kwargs)  # type: ignore[arg-type]
+
+
+def new_errors(**overrides: object) -> dict[str, str]:
+    """Mint through new() and return {field: code} for the refused marks."""
+    with pytest.raises(EnvelopeValidationError) as exc:
+        marked(**overrides)
+    for err in exc.value.errors:
+        assert err.code in ERROR_CODES, f"undeclared error code {err.code!r}"
+        assert err.message
+    return {err.field: err.code for err in exc.value.errors}
+
+
+def test_the_mark_vocabularies_are_the_closed_lists_from_issue_15() -> None:
+    assert dict(MARK_VOCABULARIES) == {
+        "visibility": ("private", "public"),
+        "origin": ("human", "ai", "code", "mixed"),
+        "fidelity": ("verbatim", "transcribed", "generated", "computed"),
+    }
+    assert isinstance(MARK_VOCABULARIES, MappingProxyType)
+    # 'published' is deliberately absent: the envelope's `time` IS that instant.
+    assert TIMESTAMP_TYPES == (
+        "created",
+        "recorded",
+        "witnessed",
+        "received",
+        "transcribed",
+        "generated",
+    )
+
+
+def test_an_unmarked_envelope_is_valid_and_reads_back_as_unknown() -> None:
+    """#15 acceptance criterion 3: absent marks mean unknown, never a default."""
+    env = Envelope.from_dict(REFERENCE_WIRE)
+    assert (env.visibility, env.origin, env.fidelity, env.timestamps) == (None, None, None, None)
+    assert env.unknown_marks() == ()
+    for key in ("visibility", "origin", "fidelity", "timestamps"):
+        assert key not in env.to_dict(), "an absent mark must be omitted, never null"
+
+
+def test_new_mints_a_marked_envelope_with_timestamps_as_a_tuple() -> None:
+    env = marked()
+    assert env.visibility == "private" and env.origin == "human"
+    assert env.fidelity == "transcribed"
+    assert env.timestamps == (
+        Timestamp(type="recorded", at="2026-10-27T09:00:00Z", by="client"),
+        Timestamp(type="transcribed", at="2026-10-27T09:00:02.5Z"),
+    )
+
+
+@pytest.mark.parametrize(
+    ("overrides", "field"),
+    [
+        ({"visibility": "secret"}, "visibility"),
+        ({"origin": "robot"}, "origin"),
+        ({"fidelity": "paraphrased"}, "fidelity"),
+        (
+            {"timestamps": [{"type": "imagined", "at": "2026-10-27T09:00:00Z"}]},
+            "timestamps[0].type",
+        ),
+    ],
+)
+def test_new_refuses_a_mark_outside_the_vocabulary(
+    overrides: dict[str, object], field: str
+) -> None:
+    """#15 acceptance criterion 2 (o1): an unknown value is refused at creation."""
+    assert new_errors(**overrides) == {field: "unknown_value"}
+
+
+def test_new_reports_every_unknown_mark_in_one_pass() -> None:
+    assert new_errors(
+        visibility="secret",
+        origin="robot",
+        fidelity="paraphrased",
+        timestamps=[{"type": "imagined", "at": "2026-10-27T09:00:00Z"}],
+    ) == {
+        "visibility": "unknown_value",
+        "origin": "unknown_value",
+        "fidelity": "unknown_value",
+        "timestamps[0].type": "unknown_value",
+    }
+
+
+def test_new_refuses_published_and_points_at_time() -> None:
+    """o8: `time` is the published instant, so it is never stored twice."""
+    with pytest.raises(EnvelopeValidationError) as exc:
+        marked(timestamps=[{"type": "published", "at": "2026-10-27T09:00:00Z"}])
+    (err,) = exc.value.errors
+    assert (err.field, err.code) == ("timestamps[0].type", "unknown_value")
+    assert "'time'" in err.message
+
+
+def test_from_dict_preserves_an_unknown_mark_verbatim() -> None:
+    """o2: read-tolerant — a newer producer's vocabulary never drops the event."""
+    payload = {
+        **MARKED_WIRE,
+        "visibility": "team",
+        "timestamps": [{"type": "published", "at": "2026-10-27T09:00:00Z"}],
+    }
+    env = Envelope.from_dict(payload)
+    assert env.visibility == "team"
+    assert env.timestamps == (Timestamp(type="published", at="2026-10-27T09:00:00Z"),)
+    assert {(e.field, e.code) for e in env.unknown_marks()} == {
+        ("visibility", "unknown_value"),
+        ("timestamps[0].type", "unknown_value"),
+    }
+
+
+def test_is_known_mark_reports_vocabulary_membership() -> None:
+    """o4: the one public membership check, shared by new() and the CLI."""
+    assert is_known_mark("visibility", "public")
+    assert not is_known_mark("visibility", "team")
+    assert is_known_mark("timestamps", "witnessed")
+    assert not is_known_mark("timestamps", "published")
+    with pytest.raises(KeyError):
+        is_known_mark("colour", "red")
+
+
+def test_a_tolerantly_read_envelope_validates_and_is_stored(tmp_path: Path) -> None:
+    """o3: validate() never applies membership, so history keeps what was read."""
+    from events_cli.history import HistoryStore
+
+    env = Envelope.from_dict({**MARKED_WIRE, "origin": "alien"})
+    env.validate()
+    store = HistoryStore(tmp_path)
+    seq = store.append(env, "marks")
+    assert store.get(env.id).envelope.origin == "alien"  # type: ignore[union-attr]
+    assert seq >= 0
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        ({"visibility": 1}, {"visibility": "not_a_string"}),
+        ({"visibility": ""}, {"visibility": "empty"}),
+        ({"origin": "Human"}, {"origin": "malformed"}),
+        ({"fidelity": "has space"}, {"fidelity": "malformed"}),
+        ({"timestamps": {"type": "created"}}, {"timestamps": "not_a_list"}),
+        ({"timestamps": []}, {"timestamps": "empty"}),
+        ({"timestamps": ["2026-10-27T09:00:00Z"]}, {"timestamps[0]": "not_an_object"}),
+        ({"timestamps": [{"at": "2026-10-27T09:00:00Z"}]}, {"timestamps[0].type": "missing"}),
+        ({"timestamps": [{"type": "created"}]}, {"timestamps[0].at": "missing"}),
+        (
+            {"timestamps": [{"type": "created", "at": "2026-10-27T09:00:00Z", "who": "x"}]},
+            {"timestamps[0].who": "unknown_field"},
+        ),
+        (
+            {"timestamps": [{"type": 3, "at": "2026-10-27T09:00:00Z"}]},
+            {"timestamps[0].type": "not_a_string"},
+        ),
+    ],
+)
+def test_a_malformed_mark_shape_is_refused_on_read(
+    payload: dict[str, object], expected: dict[str, str]
+) -> None:
+    """o2: tolerance covers unknown *words*, never a broken shape."""
+    assert errors_for(wire(**payload)) == expected
+
+
+def test_a_malformed_mark_shape_is_refused_at_new_too() -> None:
+    assert new_errors(origin="Human", timestamps=[{"type": "created"}]) == {
+        "origin": "malformed",
+        "timestamps[0].at": "missing",
+    }
+
+
+@pytest.mark.parametrize(
+    ("at", "code"),
+    [
+        ("2026-10-27T09:00:00+02:00", "not_utc"),
+        ("2026-10-27", "malformed"),
+        (20261027, "not_a_string"),
+    ],
+)
+def test_timestamp_at_reuses_the_utc_only_rfc3339_rule(at: object, code: str) -> None:
+    """o7 / #15 criterion 2: a non-RFC-3339 'at' is refused, under its own path."""
+    assert errors_for(wire(timestamps=[{"type": "created", "at": at}])) == {
+        "timestamps[0].at": code
+    }
+
+
+@pytest.mark.parametrize(
+    ("by", "ok"), [("client", True), ("server.clock", True), ("", False), ("a b", False)]
+)
+def test_timestamp_by_follows_the_producer_identifier_rule(by: str, ok: bool) -> None:
+    """o9: `by` names who asserts the time — a short identifier, not a URI."""
+    payload = wire(timestamps=[{"type": "created", "at": "2026-10-27T09:00:00Z", "by": by}])
+    if ok:
+        assert Envelope.from_dict(payload).timestamps[0].by == by  # type: ignore[index]
+    else:
+        assert set(errors_for(payload)) == {"timestamps[0].by"}
+
+
+def test_marks_round_trip_the_wire_unchanged() -> None:
+    """o5: to_dict(from_dict(x)) == x, preserved unknown values included."""
+    for payload in (MARKED_WIRE, {**MARKED_WIRE, "fidelity": "dubbed"}):
+        env = Envelope.from_dict(payload)
+        assert env.to_dict() == payload
+        assert Envelope.from_json(env.to_json()) == env
+    timestamps = marked().to_dict()["timestamps"]
+    assert timestamps == [
+        {"type": "recorded", "at": "2026-10-27T09:00:00Z", "by": "client"},
+        {"type": "transcribed", "at": "2026-10-27T09:00:02.5Z"},
+    ], "an absent 'by' is omitted, never null"
+
+
+def test_marked_envelopes_hash_and_compare_by_value() -> None:
+    """o6: marks must not cost envelopes their place in a set."""
+    a = Envelope.from_dict(MARKED_WIRE)
+    b = Envelope.from_dict(MARKED_WIRE)
+    assert a == b and hash(a) == hash(b) and len({a, b}) == 1
+    assert a != dataclasses.replace(a, visibility="public")
+    # new() from mappings and from_dict() from the wire yield the same tuple.
+    assert marked().timestamps == a.timestamps
+
+
+def test_timestamp_is_frozen() -> None:
+    stamp = Timestamp(type="created", at="2026-10-27T09:00:00Z")
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        stamp.at = "2026-10-27T10:00:00Z"  # type: ignore[misc]

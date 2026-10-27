@@ -20,6 +20,20 @@ What consumers may depend on
 * ``time`` round-trips **verbatim**. Both ``…Z`` and ``…+00:00`` are accepted
   and neither is rewritten into the other.
 
+Content marks are write-strict, read-tolerant
+---------------------------------------------
+
+``visibility``, ``origin``, ``fidelity`` and ``timestamps`` (issue #15) say who
+may see an event, who produced it, how it became what it is, and when each
+thing happened to it. Absent marks mean **unknown** — never public, never
+human. The vocabularies are closed *for producers*: :meth:`Envelope.new`
+refuses a value outside :data:`MARK_VOCABULARIES` / :data:`TIMESTAMP_TYPES`.
+:meth:`Envelope.from_dict` checks only the *shape* and preserves an unknown
+word verbatim, because the drain drops an envelope it cannot parse for good —
+a strict reader would permanently lose every event a newer producer marked
+with a word this release has not learned yet. :meth:`Envelope.unknown_marks`
+and :func:`is_known_mark` say which values are outside the vocabulary.
+
 Idempotency is part of the contract
 -----------------------------------
 
@@ -47,10 +61,14 @@ from events_cli.core.errors import ENVELOPE_FIELD, EnvelopeValidationError, Fiel
 
 __all__ = [
     "EVENT_ID_PREFIX",
+    "MARK_VOCABULARIES",
     "REQUIRED_FIELDS",
     "SCHEMA_VERSION",
+    "TIMESTAMP_TYPES",
     "WIRE_FIELD_NAMES",
     "Envelope",
+    "Timestamp",
+    "is_known_mark",
     "new_event_id",
     "new_id",
     "now_rfc3339",
@@ -374,6 +392,153 @@ def _check_data(field_name: str, value: Any, errors: list[FieldError]) -> None:
     _check_json_value(field_name, value, 0, errors)
 
 
+# --- content marks (#15) ---------------------------------------------------
+#
+# The vocabularies are deliberately small and will grow; see the module
+# docstring for why only new() enforces them. A mark *word* must still look
+# like one (lowercase, no whitespace) on every path, so tolerance never admits
+# a value no future vocabulary could contain.
+
+#: The closed vocabulary of each scalar mark, as producers may use it today.
+MARK_VOCABULARIES: Mapping[str, tuple[str, ...]] = MappingProxyType(
+    {
+        "visibility": ("private", "public"),
+        "origin": ("human", "ai", "code", "mixed"),
+        "fidelity": ("verbatim", "transcribed", "generated", "computed"),
+    }
+)
+
+#: The closed vocabulary of timestamp types. ``published`` is deliberately
+#: absent: the envelope's own ``time`` is the instant it was published, and
+#: storing that twice would let the two copies disagree.
+TIMESTAMP_TYPES: tuple[str, ...] = (
+    "created",
+    "recorded",
+    "witnessed",
+    "received",
+    "transcribed",
+    "generated",
+)
+
+_MAX_MARK_LENGTH = 64
+_MARK_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
+_TIMESTAMP_KEYS = frozenset({"type", "at", "by"})
+_PUBLISHED_HINT = "is not a timestamp type: the envelope's 'time' is the published instant"
+
+
+def is_known_mark(mark: str, value: str) -> bool:
+    """Whether ``value`` is in the current vocabulary of ``mark``.
+
+    ``mark`` is a scalar mark name (``visibility``, ``origin``, ``fidelity``)
+    or ``timestamps`` for a timestamp type; any other name raises ``KeyError``.
+    """
+    if mark == "timestamps":
+        return value in TIMESTAMP_TYPES
+    return value in MARK_VOCABULARIES[mark]
+
+
+@dataclass(frozen=True)
+class Timestamp:
+    """One typed instant in the life of an event's content.
+
+    ``by`` names who asserts the time when that is not the envelope's own
+    ``source`` (``client`` for a browser's clock) — a claim, not a measurement.
+    """
+
+    type: str
+    at: str
+    by: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """The wire form; an absent ``by`` is omitted, never emitted as null."""
+        payload: dict[str, Any] = {"type": self.type, "at": self.at}
+        if self.by is not None:
+            payload["by"] = self.by
+        return payload
+
+
+def _coerce_timestamps(value: Any) -> Any:
+    """Turn a list of well-keyed mappings into ``tuple[Timestamp, ...]``.
+
+    Anything that cannot become a Timestamp is kept as given, for validate()
+    to report by path, rather than raising here.
+    """
+    if not isinstance(value, (list, tuple)):
+        return value
+    items = []
+    for item in value:
+        if (
+            isinstance(item, Mapping)
+            and _TIMESTAMP_KEYS.issuperset(item)
+            and "type" in item
+            and "at" in item
+        ):
+            item = Timestamp(**item)
+        items.append(item)
+    return tuple(items)
+
+
+def _check_mark_word(field_name: str, value: Any, errors: list[FieldError]) -> None:
+    text = _check_text(field_name, value, errors)
+    if text is None:
+        return
+    if len(text) > _MAX_MARK_LENGTH:
+        errors.append(
+            FieldError(field_name, "too_long", f"must be at most {_MAX_MARK_LENGTH} characters")
+        )
+        return
+    if not _MARK_RE.match(text):
+        errors.append(
+            FieldError(field_name, "malformed", "must be a lowercase word, e.g. 'private'")
+        )
+
+
+def _check_timestamp_mapping(path: str, item: Mapping[Any, Any], errors: list[FieldError]) -> None:
+    """Report why a mapping did not become a Timestamp: unknown or missing keys."""
+    for key in item:
+        if key not in _TIMESTAMP_KEYS:
+            errors.append(FieldError(f"{path}.{key}", "unknown_field", "is not a timestamp field"))
+    for key in ("type", "at"):
+        if key not in item:
+            errors.append(FieldError(f"{path}.{key}", "missing", "is required"))
+
+
+def _check_timestamps(field_name: str, value: Any, errors: list[FieldError]) -> None:
+    if not isinstance(value, (list, tuple)):
+        errors.append(
+            FieldError(
+                field_name, "not_a_list", f"must be a list of objects, got {type(value).__name__}"
+            )
+        )
+        return
+    if not value:
+        errors.append(FieldError(field_name, "empty", "must not be empty (omit it instead)"))
+        return
+    for index, item in enumerate(value):
+        path = f"{field_name}[{index}]"
+        if isinstance(item, Mapping):
+            _check_timestamp_mapping(path, item, errors)
+        elif not isinstance(item, Timestamp):
+            errors.append(
+                FieldError(path, "not_an_object", f"must be an object, got {type(item).__name__}")
+            )
+        else:
+            _check_mark_word(f"{path}.type", item.type, errors)
+            _check_time(f"{path}.at", item.at, errors)
+            if item.by is not None:
+                _check_identifier(f"{path}.by", item.by, errors)
+
+
+def _unknown_word(field_name: str, mark: str, value: Any) -> FieldError | None:
+    """A FieldError for a well-shaped word outside the vocabulary, else None."""
+    if not isinstance(value, str) or not _MARK_RE.match(value) or is_known_mark(mark, value):
+        return None
+    if mark == "timestamps" and value == "published":
+        return FieldError(field_name, "unknown_value", f"'published' {_PUBLISHED_HINT}")
+    known = TIMESTAMP_TYPES if mark == "timestamps" else MARK_VOCABULARIES[mark]
+    return FieldError(field_name, "unknown_value", f"{value!r} is not one of {', '.join(known)}")
+
+
 # --- the envelope ----------------------------------------------------------
 
 
@@ -410,12 +575,19 @@ class Envelope:
     traceparent: str | None = None
     producer: str | None = None
     delivery_attempt: int | None = None
+    visibility: str | None = None
+    origin: str | None = None
+    fidelity: str | None = None
+    timestamps: tuple[Timestamp, ...] | None = None
     data: Mapping[str, Any] = field(default_factory=dict, hash=False)
 
     def __post_init__(self) -> None:
         # Defensive copy; a non-mapping is left alone for validate() to report.
         if isinstance(self.data, Mapping):
             object.__setattr__(self, "data", dict(self.data))
+        # A tuple keeps the envelope hashable; unconvertible items stay as
+        # given so validate() can say which one is wrong.
+        object.__setattr__(self, "timestamps", _coerce_timestamps(self.timestamps))
 
     @classmethod
     def new(
@@ -431,13 +603,19 @@ class Envelope:
         traceparent: str | None = None,
         producer: str | None = None,
         delivery_attempt: int | None = None,
+        visibility: str | None = None,
+        origin: str | None = None,
+        fidelity: str | None = None,
+        timestamps: Any = None,
         id: str | None = None,
         time: str | None = None,
     ) -> "Envelope":
         """Mint a new event, generating ``id`` and ``time``, and validate it.
 
         Validating here means a producer learns about a bad event type at the
-        point of creation rather than after it has reached the transport.
+        point of creation rather than after it has reached the transport. This
+        is also the one place the mark vocabularies are enforced: ``timestamps``
+        takes :class:`Timestamp` instances or ``{type, at, by}`` mappings.
         """
         envelope = cls(
             id=id if id is not None else new_event_id(),
@@ -451,9 +629,15 @@ class Envelope:
             traceparent=traceparent,
             producer=producer,
             delivery_attempt=delivery_attempt,
+            visibility=visibility,
+            origin=origin,
+            fidelity=fidelity,
+            timestamps=timestamps,
             data=data if data is not None else {},
         )
-        envelope.validate()
+        errors = envelope.validation_errors() + envelope.unknown_marks()
+        if errors:
+            raise EnvelopeValidationError(errors)
         return envelope
 
     # -- validation --------------------------------------------------------
@@ -463,10 +647,29 @@ class Envelope:
         return tuple(_collect_errors(self))
 
     def validate(self) -> None:
-        """Raise :class:`EnvelopeValidationError` if this envelope is invalid."""
+        """Raise :class:`EnvelopeValidationError` if this envelope is invalid.
+
+        Checks shape only, never vocabulary membership: an envelope read
+        tolerantly off the wire must still validate wherever it goes next.
+        """
         errors = self.validation_errors()
         if errors:
             raise EnvelopeValidationError(errors)
+
+    def unknown_marks(self) -> tuple[FieldError, ...]:
+        """An ``unknown_value`` error for each mark outside the vocabularies.
+
+        Empty for an unmarked envelope. :meth:`new` refuses anything this
+        reports; a reader uses it to flag what it does not recognise.
+        """
+        found = [_unknown_word(mark, mark, getattr(self, mark)) for mark in MARK_VOCABULARIES]
+        if isinstance(self.timestamps, tuple):
+            found.extend(
+                _unknown_word(f"timestamps[{index}].type", "timestamps", item.type)
+                for index, item in enumerate(self.timestamps)
+                if isinstance(item, Timestamp)
+            )
+        return tuple(err for err in found if err is not None)
 
     # -- serialisation -----------------------------------------------------
 
@@ -477,6 +680,10 @@ class Envelope:
             value = getattr(self, name)
             if name == "data":
                 payload[wire_name] = dict(value) if isinstance(value, Mapping) else value
+            elif name == "timestamps" and isinstance(value, tuple):
+                payload[wire_name] = [
+                    item.to_dict() if isinstance(item, Timestamp) else item for item in value
+                ]
             elif value is not None:
                 payload[wire_name] = value
         return payload
@@ -563,6 +770,10 @@ WIRE_FIELD_NAMES: Mapping[str, str] = MappingProxyType(
         "traceparent": "traceparent",
         "producer": "producer",
         "delivery_attempt": "deliveryAttempt",
+        "visibility": "visibility",
+        "origin": "origin",
+        "fidelity": "fidelity",
+        "timestamps": "timestamps",
         "data": "data",
     }
 )
@@ -594,6 +805,10 @@ _CHECKS = {
     "traceparent": _check_traceparent,
     "producer": _check_identifier,
     "delivery_attempt": _check_delivery_attempt,
+    "visibility": _check_mark_word,
+    "origin": _check_mark_word,
+    "fidelity": _check_mark_word,
+    "timestamps": _check_timestamps,
     "data": _check_data,
 }
 

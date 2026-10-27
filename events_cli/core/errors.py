@@ -35,6 +35,8 @@ ERROR_CODES: tuple[str, ...] = (
     "out_of_range",
     "unsupported_type",  # a value JSON cannot represent
     "reserved_mqtt_char",  # a pattern used a raw MQTT wildcard/separator ('#', '+', '/')
+    "not_a_list",  # `timestamps` is not a JSON array
+    "unknown_value",  # a well-shaped mark outside its vocabulary (refused by new() only)
 )
 
 # Field name used for problems with the document as a whole rather than one
