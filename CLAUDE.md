@@ -220,7 +220,14 @@ and validates in one pass, reporting **every** problem as a field-level
 CloudEvents**: unknown top-level keys are rejected (put producer values inside
 `data`), `schemaVersion` must be numeric on the wire, `type` must be
 lowercase-dotted (`task.requested` — wrong case is rejected, not normalised), and
-`source` must be an absolute URI (`agent://builder`). Events are facts, so the
+`source` must be an absolute URI (`agent://builder`). Four optional **content
+marks** — `visibility`, `origin`, `fidelity`, `timestamps` — say what `data` is;
+absent means unknown (never public, never human) and absent marks are omitted
+from the wire. They are **write-strict, read-tolerant**: `Envelope.new()` and
+`events emit` refuse a word outside the vocabulary, while `from_dict` preserves
+one verbatim (`unknown_marks()` reports it), because the drain acks-and-drops
+anything it cannot parse and a strict reader would lose events from a newer
+producer; shape is checked everywhere. Events are facts, so the
 dataclass is frozen; delivery is at-least-once (QoS 1), so consumers **must**
 dedupe on `id`.
 
@@ -493,11 +500,11 @@ because the resemblance will otherwise be assumed.
 
 ```bash
 uv sync
-uv run pytest -n auto                  # default selection (744 tests today)
+uv run pytest -n auto                  # default selection (817 tests today)
 uv run pytest tests/test_cli.py -v     # one file
 uv run pytest -k whoami -v             # one test / pattern
 uv run pytest -n auto --cov=events_cli --cov-report=term   # with coverage
-uv run pytest -m stack                 # broker/docker integration (needs docker; 13 tests)
+uv run pytest -m stack                 # broker/docker integration (needs docker; 14 tests)
 uv run pytest -m perf                  # the enqueue-latency bound
 ```
 

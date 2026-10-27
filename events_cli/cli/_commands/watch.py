@@ -58,9 +58,11 @@ from __future__ import annotations
 import argparse
 import math
 
+from events_cli.cli._commands.list import marks_suffix
 from events_cli.cli._errors import EXIT_ENV_ERROR, EXIT_USER_ERROR, CliError
 from events_cli.cli._output import emit_result
 from events_cli.cli._prog import prog_name
+from events_cli.core import Envelope
 from events_cli.history import HistoryError, InvalidSubscriptionError, open_store
 from events_cli.subs import SubscriptionValidationError, SubsError, UnknownSubscriptionError
 from events_cli.subs.drain import (
@@ -209,7 +211,10 @@ def _render(payload: dict[str, object], *, json_mode: bool) -> None:
         lines.append(f"  skipped: {len(skipped)} unreadable payload(s) on the broker")
     for record in records:
         event = record["event"]
-        lines.append(f"  [{record['seq']}] {event['type']}  id={event['id']}")
+        lines.append(
+            f"  [{record['seq']}] {event['type']}  id={event['id']}"
+            + marks_suffix(Envelope.from_dict(event))
+        )
     if not records:
         lines.append("  (no events)")
     lines.append("")

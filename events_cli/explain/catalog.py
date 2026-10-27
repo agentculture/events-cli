@@ -525,6 +525,12 @@ no `--follow`: an unbounded stream would hang whatever is reading it, which
 for an agent means a hung turn. Poll `watch` again with the returned cursor
 instead.
 
+## Content marks
+
+Each event in the batch shows its content marks (`visibility`, `origin`,
+`fidelity`, `timestamps`) in text output when it has any; `--json` carries them
+verbatim, including a word outside today's vocabulary. Absent means unknown.
+
 ## How `--since` composes history and the broker
 
 1. `HistoryStore.read(name, since, max)` — bounded, exact, no broker
@@ -581,6 +587,23 @@ payload is `{}`.
 `--correlation-id` / `--causation-id` / `--run-id` set the envelope's
 correlation fields, so a pipeline of related events can be tied together at
 emit time.
+
+## Content marks
+
+Optional marks say what the content is. Absent means unknown: never public,
+never human.
+
+    events emit note.made --visibility private --origin human --fidelity verbatim
+    events emit note.made --marks marks.json
+
+`--visibility` (`private|public`), `--origin` (`human|ai|code|mixed`) and
+`--fidelity` (`verbatim|transcribed|generated|computed`) refuse a word outside
+the vocabulary. `--marks <file>` is a JSON object of the same keys plus
+`timestamps` (a list of `{type, at, by?}`, `at` UTC RFC 3339) and is the only
+CLI path for timestamps. A mark may not be given by both its flag and
+`--marks`; that is refused. `published` is not a timestamp type: the
+envelope's `time` is the published instant. See
+`docs/contract.md`.
 
 ## QoS is always 1
 
@@ -652,6 +675,12 @@ several subscriptions is reported once.
     events list
     events list --type task.requested
     events list --max 20 --json
+
+## Content marks
+
+Text output shows an event's content marks (`visibility`, `origin`,
+`fidelity`, `timestamps`) when it has any; `--json` carries them verbatim,
+including a word outside today's vocabulary. Absent means unknown.
 
 ## Defaults
 

@@ -31,6 +31,7 @@ decided design constraint with an issue, not a shipped behaviour.
 | Lane | Status |
 |------|--------|
 | Envelope core — CloudEvents-shaped, immutable, pure and dockerless | built (first slice) |
+| Envelope content marks — `visibility` / `origin` / `fidelity` / `timestamps`, write-strict and read-tolerant ([#15](https://github.com/agentculture/events-cli/issues/15)) | built |
 | Canonical topic mapping — dotted `type` ⇄ MQTT topic (`events_cli/core/topics.py`) | built (second wave) |
 | Importable publish client — `import events_cli` | built (first slice) |
 | Raw MQTT port — TCP 1883 on loopback | supported surface (first slice) |
@@ -344,6 +345,68 @@ concrete consequences:
   drained — a view over what was captured, never a claim that every event
   ever published is in it. Consumers must not read it as a complete log.
 
+## Envelope content marks: what the content is, not just where it travelled
+
+An envelope can carry four optional **content marks** that say what its `data`
+is: who may see it, who or what produced it, how faithfully it records its
+source, and when things happened. They exist so a consumer can decide, for
+example, whether a transcript is verbatim human speech or model-generated text,
+without guessing from the `type`.
+
+| Field | Vocabulary | Meaning |
+|-------|------------|---------|
+| `visibility` | `private`, `public` | who the content may be shown to |
+| `origin` | `human`, `ai`, `code`, `mixed` | who or what produced the content |
+| `fidelity` | `verbatim`, `transcribed`, `generated`, `computed` | how faithfully it records its source |
+
+`timestamps` is a non-empty list of objects `{"type", "at", "by"?}`. The `type`
+is one of:
+
+| Timestamp `type` | The instant the content was |
+|------------------|------------------------------|
+| `created` | made |
+| `recorded` | captured by a sensor or recorder |
+| `witnessed` | observed |
+| `received` | received by the producer |
+| `transcribed` | converted from one medium to another |
+| `generated` | produced by a model or a program |
+
+- **Absent means unknown.** An envelope without a mark is **never** treated as
+  `public`, never as `human`, and carries no time beyond `time`. Absent marks
+  are omitted from the wire, never sent as `null`.
+- **Write-strict, read-tolerant.** `Envelope.new()` and `events emit` refuse a
+  word outside the vocabulary. `Envelope.from_dict` preserves one verbatim, and
+  `Envelope.unknown_marks()` / `is_known_mark()` report which marks a reader
+  does not recognise. The reason is the drain: it acknowledges and drops any
+  payload it cannot parse (see
+  [above](#a-payload-that-is-not-an-envelope-is-dropped-permanently)), so a
+  strict reader would permanently lose every event from a producer on a newer
+  vocabulary. *Shape* is still checked everywhere: a mark is a lowercase word,
+  and `timestamps` is a non-empty list of objects carrying only `type`, `at`
+  and `by`.
+- **`published` is not a timestamp type.** The envelope's `time` already *is*
+  the published instant, and `new()` refuses `published` with that hint. This is
+  a deliberate deviation from the table in #15.
+- **`at` is UTC-only RFC 3339** (`Z` or `+00:00`), the same rule as `time`.
+  This is narrower than #15's plain "RFC 3339".
+- **`by` is a claim, not a measurement.** It names who asserts the time when
+  that is not the envelope's `source` — for example `client` for a browser
+  clock. It is a short identifier, under the same rule as `producer`; consumers
+  must not treat it as verified.
+- **Combined content.** Use `origin: mixed`, or put per-part marks inside
+  `data`. The per-part shape is a producer convention and is **not validated**
+  here (parked).
+- **Carried and validated, not enforced.** events-cli never withholds an event
+  because of its `visibility`. Honouring `private` is `culture-rules`' job.
+- **Rollout: readers before producers.** A reader on events-cli 0.10.x rejects
+  the new keys as `unknown_field`, and its drain then drops the event
+  permanently. `culture-rules` must be on 0.11 before `embodiment` emits marks.
+
+On the CLI, `events emit` takes `--visibility`, `--origin` and `--fidelity`, and
+`--marks <file>` (a JSON object; the only CLI path for `timestamps`).
+`events list` and `events watch` show the marks in text output and carry them
+verbatim in `--json`.
+
 ## A payload that is not an envelope is dropped, permanently
 
 If a message arrives on a contract-lane topic and does not parse as a valid
@@ -364,7 +427,11 @@ publish. `events emit` does this for you — it rejects an invalid envelope with
 field-level errors and publishes nothing. If you publish directly with
 `EventClient`, build your envelope through `events_cli.core.Envelope` rather
 than hand-writing JSON, and treat a `skipped` entry appearing in a consumer's
-drain as a producer bug to fix at the source.
+drain as a producer bug to fix at the source — with one exception: a consumer
+still on events-cli 0.10.x skips every envelope that carries content marks,
+because it does not know those keys. That is the *reader* being behind, not a
+producer bug; upgrade the reader (see the reader-first rollout under content
+marks above).
 
 The asymmetry is worth knowing, because it is the opposite decision to the one
 made for store failures: a bad payload is acknowledged because the fault is in

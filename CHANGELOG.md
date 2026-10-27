@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-10-27
+
+### Added
+
+- Content marks on the envelope (#15): optional `visibility` (private|public), `origin` (human|ai|code|mixed), `fidelity` (verbatim|transcribed|generated|computed) and typed `timestamps` (a tuple of frozen `Timestamp(type, at, by)`; types created, recorded, witnessed, received, transcribed, generated). Absent means unknown and is omitted from the wire.
+- `Envelope.unknown_marks()`, `is_known_mark()`, `MARK_VOCABULARIES`, `TIMESTAMP_TYPES` and `Timestamp`, exported from `events_cli.core`; error codes `not_a_list` and `unknown_value`.
+- `events emit --visibility/--origin/--fidelity` and `--marks FILE` (a JSON object; the only CLI path for timestamps).
+- `events list` and `events watch` show marks in text output (unrecognised words flagged) and carry them verbatim in `--json`.
+- docs/contract.md section on content marks; explain entries for emit/list/watch.
+
+### Changed
+
+- Marks are write-strict, read-tolerant: `Envelope.new()` and `events emit` refuse a word outside the vocabulary, while `from_dict` preserves it verbatim, because the drain drops an unparseable payload for good. `published` is not a timestamp type: `time` is the published instant.
+- Rollout is reader-first: a reader on events-cli 0.10.x rejects the new keys as unknown fields and its drain drops the event permanently, so readers (culture-rules) must be on 0.11 before producers (embodiment) emit marks.
+
 ## [0.10.0] - 2026-07-24
 
 ### Added
