@@ -600,8 +600,9 @@ never human.
 `--fidelity` (`verbatim|transcribed|generated|computed`) refuse a word outside
 the vocabulary. `--marks <file>` is a JSON object of the same keys plus
 `timestamps` (a list of `{type, at, by?}`, `at` UTC RFC 3339) and is the only
-CLI path for timestamps. A flag overrides the same key in the file. `published`
-is not a timestamp type: the envelope's `time` is the published instant. See
+CLI path for timestamps. A mark may not be given by both its flag and
+`--marks`; that is refused. `published` is not a timestamp type: the
+envelope's `time` is the published instant. See
 `docs/contract.md`.
 
 ## QoS is always 1

@@ -493,14 +493,26 @@ def _check_mark_word(field_name: str, value: Any, errors: list[FieldError]) -> N
         )
 
 
+def _check_timestamp_values(path: str, item: Any, errors: list[FieldError]) -> None:
+    """Check whichever of type / at / by a Timestamp or a raw mapping holds."""
+    fields = item if isinstance(item, Mapping) else item.to_dict()
+    if "type" in fields:
+        _check_mark_word(f"{path}.type", fields["type"], errors)
+    if "at" in fields:
+        _check_time(f"{path}.at", fields["at"], errors)
+    if fields.get("by") is not None:
+        _check_identifier(f"{path}.by", fields["by"], errors)
+
+
 def _check_timestamp_mapping(path: str, item: Mapping[Any, Any], errors: list[FieldError]) -> None:
-    """Report why a mapping did not become a Timestamp: unknown or missing keys."""
+    """Report why a mapping did not become a Timestamp, then check its values too."""
     for key in item:
         if key not in _TIMESTAMP_KEYS:
             errors.append(FieldError(f"{path}.{key}", "unknown_field", "is not a timestamp field"))
     for key in ("type", "at"):
         if key not in item:
             errors.append(FieldError(f"{path}.{key}", "missing", "is required"))
+    _check_timestamp_values(path, item, errors)
 
 
 def _check_timestamps(field_name: str, value: Any, errors: list[FieldError]) -> None:
@@ -523,10 +535,7 @@ def _check_timestamps(field_name: str, value: Any, errors: list[FieldError]) -> 
                 FieldError(path, "not_an_object", f"must be an object, got {type(item).__name__}")
             )
         else:
-            _check_mark_word(f"{path}.type", item.type, errors)
-            _check_time(f"{path}.at", item.at, errors)
-            if item.by is not None:
-                _check_identifier(f"{path}.by", item.by, errors)
+            _check_timestamp_values(path, item, errors)
 
 
 def _unknown_word(field_name: str, mark: str, value: Any) -> FieldError | None:

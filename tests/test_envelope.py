@@ -1042,6 +1042,16 @@ def test_a_malformed_mark_shape_is_refused_on_read(
     assert errors_for(wire(**payload)) == expected
 
 
+def test_a_malformed_timestamp_mapping_reports_every_defect_in_one_pass() -> None:
+    """An item with a stray key still has its values checked, like every other field."""
+    payload = wire(timestamps=[{"type": 3, "at": "yesterday", "who": "x"}])
+    assert errors_for(payload) == {
+        "timestamps[0].who": "unknown_field",
+        "timestamps[0].type": "not_a_string",
+        "timestamps[0].at": "malformed",
+    }
+
+
 def test_a_malformed_mark_shape_is_refused_at_new_too() -> None:
     assert new_errors(origin="Human", timestamps=[{"type": "created"}]) == {
         "origin": "malformed",
