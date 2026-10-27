@@ -1,0 +1,407 @@
+{
+  "slug": "envelope-content-marks",
+  "title": "envelope content marks",
+  "frame_slug": "envelope-content-marks",
+  "schema_version": 5,
+  "status": "exported",
+  "created": "2026-10-27T18:24:54Z",
+  "updated": "2026-10-27T18:26:42Z",
+  "targets": [
+    {
+      "id": "c1",
+      "kind": "announcement",
+      "text": "events-cli envelopes carry content marks \u2014 visibility, origin, fidelity and typed timestamps \u2014 validated against closed vocabularies, carried on the wire unchanged, shown by events list/watch, and documented with absent-means-unknown, so culture-rules can act on them (#15)",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h1",
+      "kind": "honesty",
+      "text": "every element of the announcement is mechanically checked: vocabulary refusal, wire carriage, list/watch display and the contract section each map to a test or a doc diff \u2014 nothing rests on a judgment call",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c2",
+      "kind": "requirement",
+      "text": "Envelope (events_cli/core/envelope.py) gains four optional fields \u2014 visibility, origin, fidelity, timestamps \u2014 each added to WIRE_FIELD_NAMES, _CHECKS and Envelope.new() kwargs; _collect_errors checks each mark's SHAPE everywhere (a string; timestamps a list of {type, at, by?} objects; at a UTC RFC 3339 instant), while the closed-vocabulary MEMBERSHIP check runs in new() only (q1/c13); test_envelope.py:286 pins the exact WIRE_FIELD_NAMES dict and must be updated deliberately",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h2",
+      "kind": "honesty",
+      "text": "test_envelope.py proves both halves: Envelope.new() with an unknown visibility/origin/fidelity/timestamp type raises EnvelopeValidationError naming the field, AND Envelope.from_dict of the same wire form succeeds with the raw value preserved and is-known false; a shape error (non-string mark, timestamp missing 'at') is refused on both paths",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c3",
+      "kind": "requirement",
+      "text": "timestamps is stored as an immutable tuple of a frozen Timestamp value type (type, at, by), not a list of dicts: Envelope's dataclass hash covers every field except data (test_envelope.py:730 asserts hash equality), so a list field would make hash(envelope) raise TypeError",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h3",
+      "kind": "honesty",
+      "text": "hash(envelope) succeeds for an envelope carrying timestamps, two equal marked envelopes hash equal, and Timestamp is frozen (assignment raises FrozenInstanceError); to_dict renders timestamps as a JSON list of objects and from_dict converts back to the tuple",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c4",
+      "kind": "requirement",
+      "text": "each timestamp's 'at' is validated with the existing parse_rfc3339, so it inherits the UTC-only rule (Z or +00:00) that 'time' already enforces; a non-UTC offset is refused with the same not_utc code",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h4",
+      "kind": "honesty",
+      "text": "a timestamp 'at' with a +02:00 offset is refused with code not_utc and a date-only string with code malformed, both under the field path timestamps[i].at; docs/contract.md states the UTC-only narrowing",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c5",
+      "kind": "requirement",
+      "text": "events list and events watch human output (list.py cmd_list line render; watch.py _render per-record line) show the marks when present and nothing when absent; --json already carries them for free because both serialise record.envelope.to_dict()",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h5",
+      "kind": "honesty",
+      "text": "test_cli_list.py and test_cli_watch.py assert a marked event's text line shows its visibility/origin/fidelity and timestamp types, an unmarked event's line is unchanged from today, an unknown preserved value renders flagged unrecognised, and --json output includes the marks verbatim",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c7",
+      "kind": "requirement",
+      "text": "docs/contract.md gains an envelope-marks section: the four attributes, both closed vocabularies, absent-means-unknown (never public, never human, no time beyond 'time'), 'by' as a claim not a measurement, and 'mixed' / per-part marks inside data; the explain catalog entries for emit/list/watch mention the marks",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h6",
+      "kind": "honesty",
+      "text": "docs/contract.md has a marks section naming all four attributes, both vocabularies, absent-means-unknown, by-is-a-claim, published-is-time, write-strict/read-tolerant and the reader-first rollout; test_every_catalog_path_resolves still passes and markdownlint is clean",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c8",
+      "kind": "boundary",
+      "text": "the client lane (events_cli/client.py) is untouched: publish_event already sends Envelope.to_json, so producers like embodiment get the marks by building the Envelope with them \u2014 no client API change, and reachy-mini-cli's 50 Hz raw lane is unaffected",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h11",
+      "kind": "honesty",
+      "text": "the PR diff does not touch events_cli/client.py, and a NEW test in test_client.py publishes a marked Envelope via publish_event and asserts the wire JSON carries all four marks",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c11",
+      "kind": "requirement",
+      "text": "rollout order is part of the deliverable: every reader (culture-rules, any events watch host) upgrades to the marks-aware events-cli BEFORE any producer (embodiment) emits marks \u2014 an older from_dict rejects the new keys as unknown_field, and the drain acks-and-drops a malformed payload permanently (contract.md 'A payload that is not an envelope is dropped, permanently')",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h8",
+      "kind": "honesty",
+      "text": "the sibling issues on culture-rules and embodiment state the reader-first order explicitly, and embodiment's issue says not to emit marks until culture-rules is on 0.11.0",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c12",
+      "kind": "requirement",
+      "text": "consumers bump their floor to the marks release (culture-rules and embodiment pyproject 'events-cli>=0.10' -> >= the new minor) \u2014 filed as cross-repo issues via the communicate skill, not edited from here",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h9",
+      "kind": "honesty",
+      "text": "both sibling issues name the exact new floor 'events-cli>=0.11'",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c14",
+      "kind": "requirement",
+      "text": "events emit gains --visibility, --origin, --fidelity and --marks <file> (JSON object of the four marks; the only CLI path for timestamps); a flag and the file naming the same mark is a user error",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h10",
+      "kind": "honesty",
+      "text": "test_cli_emit.py covers: each scalar flag lands on the emitted envelope; --marks <file> carries timestamps; a flag and the file naming the same mark exits 1 with a hint; an unknown value via either path exits 1 through EnvelopeValidationError; 'published' in --marks is refused with the time hint",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c17",
+      "kind": "audience",
+      "text": "Producers that mark their content \u2014 embodiment (Gwen) first, via Envelope.new + EventClient \u2014 and readers that act on marks \u2014 culture-rules first, draining via events_cli.subs \u2014 plus humans and agents emitting or inspecting events through events emit/list/watch. reachy-mini-cli's raw-MQTT lane is unaffected",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h12",
+      "kind": "honesty",
+      "text": "the named audience is real: embodiment builds envelopes with Envelope.new (embodiment/events.py, bus.py) and culture-rules drains via drain_subscription (events_cli_adapter.py), and the PR diff touches nothing on reachy-mini-cli's raw lane",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c18",
+      "kind": "after_state",
+      "text": "An event can say who may see it (visibility), who produced it (origin), how it became what it is (fidelity), and when each thing happened to it (typed timestamps); a producer building a mark outside the closed vocabularies is refused at Envelope.new(); the marks round-trip through the broker and history unchanged; events list/watch show them; and an unmarked event stays valid and reads as unknown",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h13",
+      "kind": "honesty",
+      "text": "every element of the after-state is checked by a named test: refusal at new() (h2), round-trip through broker and history (c20's stack-marked test), list/watch display (h5), and an unmarked envelope reading as unknown",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c19",
+      "kind": "why_it_matters",
+      "text": "Today nothing that crosses the mesh says whether it is private, whether a human or a model produced it, or whether it is verbatim or transcribed \u2014 and 'time' is one untyped instant. culture-rules cannot act on, and later quality/coherence scoring cannot weigh, a distinction the envelope never carries; the envelope is the one contract every producer shares, so the marks belong there (#15)",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h14",
+      "kind": "honesty",
+      "text": "the before-state is true on main today: Envelope has no visibility/origin/fidelity/timestamps field, and from_dict rejects those keys as unknown_field",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c20",
+      "kind": "success_signal",
+      "text": "#15's three acceptance criteria pass in the test suite: a visibility=private/origin=human/fidelity=transcribed envelope with two typed timestamps round-trips through the broker (stack marker) and history with marks intact; an unknown visibility/origin/fidelity/timestamp type or a non-RFC-3339 'at' is refused at new(); an unmarked envelope is valid and reads back as unknown \u2014 and culture-rules is on 0.11.0 before embodiment emits marks",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h15",
+      "kind": "honesty",
+      "text": "#15's three acceptance criteria each map to one named test that passes \u2014 the round-trip under the stack marker (pytest -m stack), the refusals and the unmarked-reads-unknown case in the default selection \u2014 and the culture-rules floor-bump issue is closed before embodiment's emit issue is acted on",
+      "deferred": false,
+      "deferred_reason": ""
+    }
+  ],
+  "tasks": [
+    {
+      "id": "t1",
+      "summary": "Core marks on Envelope (events_cli/core/envelope.py, events_cli/core/__init__.py, tests/test_envelope.py): add the four optional fields, the closed vocabularies, a frozen Timestamp(type, at, by=None), shape checks in _CHECKS, vocabulary membership in new() only, and a public is-known helper",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "o1: Envelope.new() with any unknown visibility/origin/fidelity value or timestamp type raises EnvelopeValidationError naming every bad field in one pass (timestamps[i].type for timestamps)",
+        "o2: Envelope.from_dict of the same wire form succeeds and preserves the raw string; a malformed shape (non-string mark, timestamps not a list of objects, missing at/type, unknown key in a timestamp object) is refused on both paths",
+        "o3: an envelope read tolerantly validates (validate() applies no membership check) and appends to a HistoryStore without error",
+        "o4: the is-known helper reports per-mark vocabulary membership and is the only vocabulary declaration outside new(); exported from events_cli.core",
+        "o5: to_dict omits absent marks (never null) and to_dict(from_dict(x)) == x for marked wire forms, including preserved unknown values",
+        "o6: hash() works on marked envelopes, equal marked envelopes hash equal, Timestamp is frozen, and from_dict and new() yield the same tuple[Timestamp, ...]",
+        "o7: 'at' reuses parse_rfc3339 unchanged; +02:00 is refused as not_utc and a date-only string as malformed under timestamps[i].at",
+        "o8/o9: new() refuses a 'published' timestamp with a message naming 'time' as the published instant (from_dict preserves it as unknown); 'by' uses the producer identifier rule so 'client' is valid and whitespace/empty is refused",
+        "the pinned WIRE_FIELD_NAMES dict in tests/test_envelope.py is updated in the same commit; the full default suite, black, isort, flake8 and bandit pass"
+      ],
+      "deps": [],
+      "covers": [
+        "c2",
+        "h2",
+        "c3",
+        "h3",
+        "c4",
+        "h4"
+      ],
+      "instruction": ""
+    },
+    {
+      "id": "t2",
+      "summary": "events list / events watch show marks (events_cli/cli/_commands/list.py, watch.py, tests/test_cli_list.py, tests/test_cli_watch.py)",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "o10: a marked event's text line shows visibility, origin, fidelity and timestamp types; a preserved unknown value is flagged unrecognised (via the is-known helper, no re-declared word list); 'time' is shown as published; an unmarked event's line is byte-identical to today's",
+        "o11: --json records carry marks exactly as envelope.to_dict() emits them, with no CLI-side reshaping"
+      ],
+      "deps": [
+        "t1"
+      ],
+      "covers": [
+        "c5",
+        "h5"
+      ],
+      "instruction": ""
+    },
+    {
+      "id": "t3",
+      "summary": "events emit marks flags (events_cli/cli/_commands/emit.py, tests/test_cli_emit.py)",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "o12: --visibility/--origin/--fidelity each land on the emitted envelope and --marks <file> carries timestamps; both feed the wire dict before Envelope.from_dict and then the new()-side membership check runs, so emit is write-strict",
+        "o12: a mark given by both a flag and --marks, an unreadable or non-object --marks file, an unknown value, or a 'published' timestamp each exit 1 with a hint, no traceback, and nothing published"
+      ],
+      "deps": [
+        "t1"
+      ],
+      "covers": [
+        "c14",
+        "h10"
+      ],
+      "instruction": ""
+    },
+    {
+      "id": "t4",
+      "summary": "Contract and explain docs for marks (docs/contract.md, events_cli/explain/catalog.py, CLAUDE.md)",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "o15: docs/contract.md gains a marks section naming both vocabularies, absent-means-unknown, write-strict/read-tolerant, by-is-a-claim, published-is-time, UTC-only 'at' and the reader-first rollout",
+        "o15: the ('emit',), ('list',), ('watch',) catalog entries mention the marks; test_every_catalog_path_resolves passes; markdownlint-cli2 is clean; CLAUDE.md's envelope description lists the four new fields"
+      ],
+      "deps": [
+        "t1"
+      ],
+      "covers": [
+        "c7",
+        "h6"
+      ],
+      "instruction": ""
+    },
+    {
+      "id": "t5",
+      "summary": "Client and history carry marks unchanged (tests/test_client.py, tests/test_history.py \u2014 tests only)",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "o13: a new test_client.py test publishes a marked Envelope via publish_event and asserts the wire JSON carries all four marks; events_cli/client.py has no diff",
+        "o14: a new test_history.py test proves a record written without marks still reads back, and a marked record re-read via HistoryRecord.from_dict keeps its marks"
+      ],
+      "deps": [
+        "t1"
+      ],
+      "covers": [
+        "c8",
+        "h11"
+      ],
+      "instruction": ""
+    },
+    {
+      "id": "t6",
+      "summary": "Broker round-trip acceptance test for #15 (new tests/test_marks_stack.py, stack marker)",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "#15 criterion 1: an envelope with visibility=private, origin=human, fidelity=transcribed and two typed timestamps, published at QoS 1 through a registered subscription, drains back via drain_subscription with marks equal to what was sent (pytest -m stack)",
+        "#15 criteria 2 and 3 are named in the file's docstring with pointers to the t1 tests that prove them (refusal at new(); unmarked envelope valid and reads as unknown), so all three criteria map to named tests"
+      ],
+      "deps": [
+        "t1"
+      ],
+      "covers": [
+        "c20",
+        "h15",
+        "c18",
+        "h13"
+      ],
+      "instruction": ""
+    },
+    {
+      "id": "t7",
+      "summary": "Version bump to 0.11.0 + CHANGELOG (pyproject.toml, CHANGELOG.md, uv.lock via version-bump skill)",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "the version-bump skill sets 0.11.0 (minor) under schemaVersion '1' with a Keep-a-Changelog entry naming the marks, the write-strict/read-tolerant rule and the reader-first rollout requirement; the version-check CI job passes"
+      ],
+      "deps": [
+        "t2",
+        "t3",
+        "t4",
+        "t5",
+        "t6"
+      ],
+      "covers": [],
+      "instruction": ""
+    },
+    {
+      "id": "t8",
+      "summary": "Acceptance audit before PR: run every suite and record the evidence (docs/acceptance/2026-10-27-envelope-marks.md)",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "the default suite, pytest -m stack and the six lint gates incl. agentfront cli doctor --strict all pass; results recorded in the acceptance doc",
+        "the doc maps every confirmed requirement and honesty condition to a named test or doc diff (h1), records that main@ab9ae04 Envelope had none of the four fields and rejected them as unknown_field (h14), and that the diff touches nothing in events_cli/client.py or reachy-mini-cli (h12)"
+      ],
+      "deps": [
+        "t7"
+      ],
+      "covers": [
+        "c1",
+        "h1",
+        "c17",
+        "h12",
+        "c19",
+        "h14"
+      ],
+      "instruction": ""
+    },
+    {
+      "id": "t9",
+      "summary": "Post-publish rollout (after 0.11.0 is on PyPI): sibling floor-bump issues and the #15 reply, via the communicate skill",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "o16: a culture-rules issue is filed first asking for events-cli>=0.11 and naming the drop-on-old-reader hazard; an embodiment issue asks for events-cli>=0.11 and says not to emit marks until the culture-rules issue is closed",
+        "a reply on events-cli#15 links both issues and names the two deviations from its text: 'published' is not stored (time is the published instant) and unknown values are preserved on read"
+      ],
+      "deps": [
+        "t8"
+      ],
+      "covers": [
+        "c11",
+        "h8",
+        "c12",
+        "h9"
+      ],
+      "instruction": ""
+    }
+  ],
+  "risks": [
+    {
+      "id": "r1",
+      "text": "culture-rules vendors events_cli-0.10.0-py3-none-any.whl at its repo root; if its deploy installs that wheel rather than resolving from PyPI, raising the floor alone will not upgrade the reader \u2014 the culture-rules issue must ask for the vendored wheel to be replaced too",
+      "kind": "unknown_nonblocking",
+      "task_id": "t9",
+      "resolved": false,
+      "resolution": ""
+    },
+    {
+      "id": "r2",
+      "text": "CI never runs the stack marker, so #15's round-trip criterion is proven only by a local pytest -m stack on spark-f8a9; the acceptance doc (t8) is its only durable evidence",
+      "kind": "follow_up",
+      "task_id": "t6",
+      "resolved": false,
+      "resolution": ""
+    }
+  ],
+  "obligations": []
+}

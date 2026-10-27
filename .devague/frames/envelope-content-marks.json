@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-10-27T16:09:47Z",
-  "updated": "2026-10-27T18:10:01Z",
+  "updated": "2026-10-27T18:26:42Z",
   "claims": [
     {
       "id": "c1",
@@ -459,5 +459,150 @@
     }
   ],
   "lapses": [],
-  "obligations": []
+  "obligations": [
+    {
+      "id": "o1",
+      "claim_id": "c2",
+      "seam": "Envelope.new()",
+      "behavior": "refuses any visibility/origin/fidelity value or timestamp type outside the closed vocabularies with EnvelopeValidationError, reporting every bad mark in one pass as a FieldError naming the wire field (timestamps[i].type for timestamps)",
+      "source_text": "Envelope (events_cli/core/envelope.py) gains four optional fields \u2014 visibility, origin, fidelity, timestamps \u2014 each added to WIRE_FIELD_NAMES, _CHECKS and Envelope.new() kwargs; _collect_errors checks each mark's SHAPE everywhere (a string; timestamps a list of {type, at, by?} objects; at a UTC RFC 3339 instant), while the closed-vocabulary MEMBERSHIP check runs in new() only (q1/c13); test_envelope.py:286 pins the exact WIRE_FIELD_NAMES dict and must be updated deliberately",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o2",
+      "claim_id": "c2",
+      "seam": "Envelope.from_dict() / from_json()",
+      "behavior": "accepts a well-shaped mark whose value is outside the vocabulary, preserves the raw string verbatim on the Envelope, and still refuses a malformed shape (non-string mark, timestamps not a list of objects, timestamp missing 'at' or 'type', unknown key inside a timestamp object)",
+      "source_text": "Envelope (events_cli/core/envelope.py) gains four optional fields \u2014 visibility, origin, fidelity, timestamps \u2014 each added to WIRE_FIELD_NAMES, _CHECKS and Envelope.new() kwargs; _collect_errors checks each mark's SHAPE everywhere (a string; timestamps a list of {type, at, by?} objects; at a UTC RFC 3339 instant), while the closed-vocabulary MEMBERSHIP check runs in new() only (q1/c13); test_envelope.py:286 pins the exact WIRE_FIELD_NAMES dict and must be updated deliberately",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o3",
+      "claim_id": "c2",
+      "seam": "Envelope.validate() / HistoryStore.append()",
+      "behavior": "never applies the vocabulary-membership check: an envelope read tolerantly from the wire validates and appends to history without error, so the read-tolerant decision cannot be undone by the store",
+      "source_text": "Envelope (events_cli/core/envelope.py) gains four optional fields \u2014 visibility, origin, fidelity, timestamps \u2014 each added to WIRE_FIELD_NAMES, _CHECKS and Envelope.new() kwargs; _collect_errors checks each mark's SHAPE everywhere (a string; timestamps a list of {type, at, by?} objects; at a UTC RFC 3339 instant), while the closed-vocabulary MEMBERSHIP check runs in new() only (q1/c13); test_envelope.py:286 pins the exact WIRE_FIELD_NAMES dict and must be updated deliberately",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o4",
+      "claim_id": "c2",
+      "seam": "is-known helper (public core API)",
+      "behavior": "reports, per mark, whether its value is a member of the current vocabulary, and is the only place outside new() that knows the vocabularies \u2014 list/watch and emit consume it rather than re-declaring the word lists",
+      "source_text": "Envelope (events_cli/core/envelope.py) gains four optional fields \u2014 visibility, origin, fidelity, timestamps \u2014 each added to WIRE_FIELD_NAMES, _CHECKS and Envelope.new() kwargs; _collect_errors checks each mark's SHAPE everywhere (a string; timestamps a list of {type, at, by?} objects; at a UTC RFC 3339 instant), while the closed-vocabulary MEMBERSHIP check runs in new() only (q1/c13); test_envelope.py:286 pins the exact WIRE_FIELD_NAMES dict and must be updated deliberately",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o5",
+      "claim_id": "c2",
+      "seam": "Envelope.to_dict() / to_json() (the wire)",
+      "behavior": "emits each mark under its wire name only when present and omits absent marks entirely (never null), and emits a preserved unknown value byte-for-byte as it was received, so to_dict(from_dict(x)) == x for any marked wire form",
+      "source_text": "Envelope (events_cli/core/envelope.py) gains four optional fields \u2014 visibility, origin, fidelity, timestamps \u2014 each added to WIRE_FIELD_NAMES, _CHECKS and Envelope.new() kwargs; _collect_errors checks each mark's SHAPE everywhere (a string; timestamps a list of {type, at, by?} objects; at a UTC RFC 3339 instant), while the closed-vocabulary MEMBERSHIP check runs in new() only (q1/c13); test_envelope.py:286 pins the exact WIRE_FIELD_NAMES dict and must be updated deliberately",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o6",
+      "claim_id": "c3",
+      "seam": "Envelope hash / equality",
+      "behavior": "hash(envelope) works for every valid marked envelope, equality compares the marks, and from_dict turns a wire timestamps list into the same tuple[Timestamp, ...] that new() produces from mappings",
+      "source_text": "timestamps is stored as an immutable tuple of a frozen Timestamp value type (type, at, by), not a list of dicts: Envelope's dataclass hash covers every field except data (test_envelope.py:730 asserts hash equality), so a list field would make hash(envelope) raise TypeError",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o7",
+      "claim_id": "c4",
+      "seam": "timestamp 'at' validation",
+      "behavior": "reuses parse_rfc3339 unchanged and reports its error code (malformed / not_utc / not_a_string) under timestamps[i].at; no second RFC 3339 grammar is introduced",
+      "source_text": "each timestamp's 'at' is validated with the existing parse_rfc3339, so it inherits the UTC-only rule (Z or +00:00) that 'time' already enforces; a non-UTC offset is refused with the same not_utc code",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o8",
+      "claim_id": "c15",
+      "seam": "Envelope.new() \u2014 'published'",
+      "behavior": "refuses a timestamp of type 'published' with a FieldError whose message says 'time' is the published instant; from_dict treats an incoming 'published' like any unknown type (preserved, not known)",
+      "source_text": "q3: 'published' is not stored in timestamps (new() refuses it, hint: 'time' is the published instant) and list/watch present time as published; timestamp 'by' is a short identifier under the producer rule",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o9",
+      "claim_id": "c15",
+      "seam": "timestamp 'by'",
+      "behavior": "validated with the same identifier rule as producer (_check_identifier), so 'client' is valid and whitespace or an empty string is refused",
+      "source_text": "q3: 'published' is not stored in timestamps (new() refuses it, hint: 'time' is the published instant) and list/watch present time as published; timestamp 'by' is a short identifier under the producer rule",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o10",
+      "claim_id": "c5",
+      "seam": "events list / events watch text render",
+      "behavior": "for a marked event append its visibility, origin, fidelity and timestamp types to the record line, flag a preserved unknown value as unrecognised, show 'time' as published, and print an unmarked event's line byte-identical to today's",
+      "source_text": "events list and events watch human output (list.py cmd_list line render; watch.py _render per-record line) show the marks when present and nothing when absent; --json already carries them for free because both serialise record.envelope.to_dict()",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o11",
+      "claim_id": "c5",
+      "seam": "events list / events watch --json",
+      "behavior": "carry each record's marks exactly as envelope.to_dict() emits them, with no CLI-side reshaping",
+      "source_text": "events list and events watch human output (list.py cmd_list line render; watch.py _render per-record line) show the marks when present and nothing when absent; --json already carries them for free because both serialise record.envelope.to_dict()",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o12",
+      "claim_id": "c14",
+      "seam": "events emit CLI",
+      "behavior": "--visibility/--origin/--fidelity and --marks <file> feed the wire dict before Envelope.from_dict, then the new()-side membership check runs, so emit is write-strict; a mark given by both a flag and the file, an unreadable or non-object --marks, or an unknown value exits 1 with a hint and no traceback, and nothing is published",
+      "source_text": "events emit gains --visibility, --origin, --fidelity and --marks <file> (JSON object of the four marks; the only CLI path for timestamps); a flag and the file naming the same mark is a user error",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o13",
+      "claim_id": "c8",
+      "seam": "EventClient.publish_event",
+      "behavior": "publishes a marked Envelope's to_json unchanged; events_cli/client.py has no diff",
+      "source_text": "the client lane (events_cli/client.py) is untouched: publish_event already sends Envelope.to_json, so producers like embodiment get the marks by building the Envelope with them \u2014 no client API change, and reachy-mini-cli's 50 Hz raw lane is unaffected",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o14",
+      "claim_id": "c6",
+      "seam": "history store on-disk format",
+      "behavior": "needs no migration: records written before the marks release still read back, and a marked record re-read via HistoryRecord.from_dict has its marks intact",
+      "source_text": "the history store needs no schema change: HistoryRecord.to_dict nests envelope.to_dict() and from_dict re-validates through Envelope.from_dict, so marked events persist and read back intact, and pre-existing unmarked records keep parsing as unknown",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o15",
+      "claim_id": "c7",
+      "seam": "docs/contract.md + explain catalog",
+      "behavior": "the contract documents both vocabularies, absent-means-unknown, write-strict/read-tolerant, by-is-a-claim, published-is-time, UTC-only 'at' and the reader-first rollout; the catalog entries for emit/list/watch mention the marks and every catalog path still resolves",
+      "source_text": "docs/contract.md gains an envelope-marks section: the four attributes, both closed vocabularies, absent-means-unknown (never public, never human, no time beyond 'time'), 'by' as a claim not a measurement, and 'mixed' / per-part marks inside data; the explain catalog entries for emit/list/watch mention the marks",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o16",
+      "claim_id": "c11",
+      "seam": "release + rollout (PyPI, sibling repos)",
+      "behavior": "0.11.0 publishes under schemaVersion '1'; culture-rules' floor-bump issue is filed first and closed before embodiment's emit issue is acted on; the #15 reply names both deviations from the issue text",
+      "source_text": "rollout order is part of the deliverable: every reader (culture-rules, any events watch host) upgrades to the marks-aware events-cli BEFORE any producer (embodiment) emits marks \u2014 an older from_dict rejects the new keys as unknown_field, and the drain acks-and-drops a malformed payload permanently (contract.md 'A payload that is not an envelope is dropped, permanently')",
+      "origin": "llm",
+      "status": "approved"
+    }
+  ]
 }
