@@ -26,6 +26,7 @@ The same gates apply: the ``stack`` marker and the ``EVENTS_STACK_IT=1`` opt-in.
 from __future__ import annotations
 
 import secrets
+import time
 from pathlib import Path
 
 import pytest
@@ -72,6 +73,10 @@ def test_content_marks_survive_a_durable_broker_round_trip(broker_factory, tmp_p
     add_subscription(name, "marks.*", address=address, registry=registry)
     try:
         with EventClient(broker.host, broker.port) as client:
+            # connect() returns at once; paho's background loop owns the socket.
+            deadline = time.monotonic() + 10.0
+            while not client.is_connected and time.monotonic() < deadline:
+                time.sleep(0.05)
             result = client.publish_event(sent, type_to_topic(event_type), qos=1, wait=10.0)
             assert result.ok, f"publish failed: {result.reason}"
 
