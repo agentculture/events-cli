@@ -468,3 +468,215 @@ def test_emit_gives_up_waiting_for_a_connection_that_never_comes(
     assert payload["publish"]["ok"] is False
     assert payload["publish"]["reason"] == "no_conn"
     assert _FakeEventClient.instances[-1].closed is True
+
+
+# --- content marks (#15): flags, --marks, and write-side strictness ---------
+
+
+def _run_marks(
+    argv: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    poison: bool = False,
+):
+    monkeypatch.setattr(emit_module, "EventClient", _poison_client if poison else _FakeEventClient)
+    rc = main(["emit", "task.requested", *argv])
+    captured = capsys.readouterr()
+    return rc, captured.out, captured.err
+
+
+def _marks_file(tmp_path: Path, content: object) -> str:
+    path = tmp_path / "marks.json"
+    path.write_text(content if isinstance(content, str) else json.dumps(content), encoding="utf-8")
+    return str(path)
+
+
+def _assert_clean_refusal(rc: int, out: str, err: str) -> None:
+    assert rc == 1
+    assert out == ""
+    assert err.startswith("error:")
+    assert "hint:" in err
+    assert "Traceback" not in err
+    assert _FakeEventClient.instances == []
+
+
+def test_emit_mark_flags_land_on_the_envelope(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rc, out, _ = _run_marks(
+        ["--visibility", "private", "--origin", "ai", "--fidelity", "generated", "--json"],
+        monkeypatch,
+        capsys,
+    )
+    assert rc == 0
+    event = json.loads(out)["event"]
+    assert event["visibility"] == "private"
+    assert event["origin"] == "ai"
+    assert event["fidelity"] == "generated"
+    sent = _FakeEventClient.instances[0].calls[0]["envelope"]
+    assert sent.visibility == "private"
+
+
+def test_emit_unmarked_envelope_carries_no_mark_keys(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rc, out, _ = _run_marks(["--json"], monkeypatch, capsys)
+    assert rc == 0
+    event = json.loads(out)["event"]
+    for key in ("visibility", "origin", "fidelity", "timestamps"):
+        assert key not in event
+
+
+def test_emit_marks_file_carries_timestamps_and_scalars(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    marks = {
+        "visibility": "public",
+        "origin": "human",
+        "fidelity": "verbatim",
+        "timestamps": [
+            {"type": "created", "at": "2026-01-01T00:00:00Z"},
+            {"type": "witnessed", "at": "2026-01-01T00:00:05Z", "by": "client"},
+        ],
+    }
+    rc, out, _ = _run_marks(
+        ["--marks", _marks_file(tmp_path, marks), "--json"], monkeypatch, capsys
+    )
+    assert rc == 0
+    event = json.loads(out)["event"]
+    assert event["visibility"] == "public"
+    assert event["origin"] == "human"
+    assert event["fidelity"] == "verbatim"
+    assert event["timestamps"] == marks["timestamps"]
+
+
+def test_emit_flag_and_marks_may_supply_different_marks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = _marks_file(tmp_path, {"origin": "code"})
+    rc, out, _ = _run_marks(
+        ["--visibility", "private", "--marks", path, "--json"], monkeypatch, capsys
+    )
+    assert rc == 0
+    event = json.loads(out)["event"]
+    assert event["visibility"] == "private"
+    assert event["origin"] == "code"
+
+
+@pytest.mark.parametrize("mark", ["visibility", "origin", "fidelity"])
+def test_emit_mark_given_by_flag_and_marks_is_refused(
+    mark: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    value = {"visibility": "public", "origin": "ai", "fidelity": "verbatim"}[mark]
+    path = _marks_file(tmp_path, {mark: value})
+    rc, out, err = _run_marks(
+        [f"--{mark}", value, "--marks", path], monkeypatch, capsys, poison=True
+    )
+    _assert_clean_refusal(rc, out, err)
+    assert mark in err
+
+
+def test_emit_marks_file_missing_is_refused(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rc, out, err = _run_marks(["--marks", "/does/not/exist.json"], monkeypatch, capsys, poison=True)
+    _assert_clean_refusal(rc, out, err)
+    assert "--marks" in err
+
+
+def test_emit_marks_file_not_utf8_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "bin.json"
+    path.write_bytes(b"\xff\xfe\x00")
+    rc, out, err = _run_marks(["--marks", str(path)], monkeypatch, capsys, poison=True)
+    _assert_clean_refusal(rc, out, err)
+
+
+def test_emit_marks_invalid_json_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rc, out, err = _run_marks(
+        ["--marks", _marks_file(tmp_path, "{nope")], monkeypatch, capsys, poison=True
+    )
+    _assert_clean_refusal(rc, out, err)
+    assert "not valid JSON" in err
+
+
+@pytest.mark.parametrize("content", [["origin", "ai"], "ai", 3, None])
+def test_emit_marks_non_object_is_refused(
+    content: object,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    path = _marks_file(tmp_path, json.dumps(content))
+    rc, out, err = _run_marks(["--marks", path], monkeypatch, capsys, poison=True)
+    _assert_clean_refusal(rc, out, err)
+    assert "object" in err
+
+
+def test_emit_marks_unknown_key_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = _marks_file(tmp_path, {"origin": "ai", "mood": "happy"})
+    rc, out, err = _run_marks(["--marks", path], monkeypatch, capsys, poison=True)
+    _assert_clean_refusal(rc, out, err)
+    assert "mood" in err
+
+
+def test_emit_marks_dash_is_refused_not_read_from_stdin(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"origin": "ai"})))
+    rc, out, err = _run_marks(["--marks", "-"], monkeypatch, capsys, poison=True)
+    _assert_clean_refusal(rc, out, err)
+    assert "stdin" in err
+
+
+@pytest.mark.parametrize("flag", ["--visibility", "--origin", "--fidelity"])
+def test_emit_unknown_flag_word_is_refused(
+    flag: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rc, out, err = _run_marks([flag, "mystery"], monkeypatch, capsys, poison=True)
+    _assert_clean_refusal(rc, out, err)
+    assert "mystery" in err
+
+
+@pytest.mark.parametrize("mark", ["visibility", "origin", "fidelity"])
+def test_emit_unknown_marks_file_word_is_refused(
+    mark: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    path = _marks_file(tmp_path, {mark: "mystery"})
+    rc, out, err = _run_marks(["--marks", path], monkeypatch, capsys, poison=True)
+    _assert_clean_refusal(rc, out, err)
+    assert "mystery" in err
+
+
+def test_emit_unknown_timestamp_type_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = _marks_file(
+        tmp_path, {"timestamps": [{"type": "sighted", "at": "2026-01-01T00:00:00Z"}]}
+    )
+    rc, out, err = _run_marks(["--marks", path], monkeypatch, capsys, poison=True)
+    _assert_clean_refusal(rc, out, err)
+    assert "sighted" in err
+
+
+def test_emit_published_timestamp_is_refused_and_points_at_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = _marks_file(
+        tmp_path, {"timestamps": [{"type": "published", "at": "2026-01-01T00:00:00Z"}]}
+    )
+    rc, out, err = _run_marks(["--marks", path], monkeypatch, capsys, poison=True)
+    _assert_clean_refusal(rc, out, err)
+    assert "time" in err

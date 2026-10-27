@@ -53,6 +53,22 @@ caused it is half the contract. ``--producer``/``--traceparent``/
 sensible fixed default (``schemaVersion``), and the flag surface stays small
 until a real caller asks for more.
 
+Content marks (#15) — write-strict, and ``--marks`` is the only timestamps path
+------------------------------------------------------------------------------
+``--visibility``/``--origin``/``--fidelity`` set the scalar marks directly.
+``--marks FILE`` holds a JSON object with any of the four marks (``visibility``,
+``origin``, ``fidelity``, ``timestamps``) and is the *only* CLI route for
+timestamps, which are a list and do not fit a flag. A mark supplied by both a
+flag and the file is refused rather than silently resolved. ``--marks`` takes a
+file path only: ``-`` is refused, so ``--data -`` can never have to share stdin
+with it.
+
+:meth:`Envelope.from_dict` is deliberately read-tolerant: it keeps a mark word
+outside today's vocabulary so a reader never drops an event a newer producer
+wrote. ``emit`` is a *producer*, so after ``from_dict`` it runs
+:meth:`Envelope.unknown_marks` and refuses anything it reports — write-strict,
+like :meth:`Envelope.new`. Nothing is published on any refusal.
+
 Publishing is always QoS 1, never a flag
 ------------------------------------------
 This is the whole point of the q3 decision :mod:`events_cli.client` documents:
@@ -105,6 +121,10 @@ _EMIT_QOS = 1
 
 _STDIN_MARKER = "-"
 
+#: The scalar marks that have a flag of their own, and every key ``--marks`` may hold.
+_MARK_FLAGS = ("visibility", "origin", "fidelity")
+_MARKS_KEYS = (*_MARK_FLAGS, "timestamps")
+
 #: How long ``emit`` waits for the asynchronous connection to come up, and then
 #: for the broker to acknowledge the publish. Two separate budgets because they
 #: fail differently and an operator should be able to tell them apart: no
@@ -152,6 +172,70 @@ def _read_data(source: str | None) -> object:
             message=f"--data is not valid JSON: {exc}",
             remediation="--data must be a JSON document (an object, by convention)",
         ) from exc
+
+
+def _read_marks(source: str | None) -> dict[str, object]:
+    """Parse ``--marks`` into a dict of wire-named marks. Absent -> ``{}``.
+
+    Only file-level and top-level-shape problems are caught here (unreadable,
+    not JSON, not an object, a key that is not a mark). What a mark's *value*
+    may be is decided by :meth:`Envelope.from_dict` and ``unknown_marks``.
+    """
+    if source is None:
+        return {}
+    if source == _STDIN_MARKER:
+        raise CliError(
+            code=EXIT_USER_ERROR,
+            message="--marks does not read stdin ('-')",
+            remediation="write the marks to a file and pass its path; stdin is reserved for --data",
+        )
+    try:
+        text = Path(source).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise CliError(
+            code=EXIT_USER_ERROR,
+            message=f"--marks {source!r} could not be read: {exc}",
+            remediation="pass a path to a readable JSON file holding a marks object",
+        ) from exc
+    try:
+        marks = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise CliError(
+            code=EXIT_USER_ERROR,
+            message=f"--marks is not valid JSON: {exc}",
+            remediation=f"--marks must be a JSON object with any of: {', '.join(_MARKS_KEYS)}",
+        ) from exc
+    if not isinstance(marks, dict):
+        raise CliError(
+            code=EXIT_USER_ERROR,
+            message=f"--marks must be a JSON object, not {type(marks).__name__}",
+            remediation=f"use an object with any of: {', '.join(_MARKS_KEYS)}",
+        )
+    unknown = sorted(key for key in marks if key not in _MARKS_KEYS)
+    if unknown:
+        raise CliError(
+            code=EXIT_USER_ERROR,
+            message=f"--marks has unknown key(s): {', '.join(map(repr, unknown))}",
+            remediation=f"the only marks are: {', '.join(_MARKS_KEYS)}",
+        )
+    return marks
+
+
+def _collect_marks(args: argparse.Namespace) -> dict[str, object]:
+    """Merge the mark flags and ``--marks``; a mark given by both is refused."""
+    marks = _read_marks(args.marks)
+    for name in _MARK_FLAGS:
+        value = getattr(args, name)
+        if value is None:
+            continue
+        if name in marks:
+            raise CliError(
+                code=EXIT_USER_ERROR,
+                message=f"mark {name!r} was given by both --{name} and --marks",
+                remediation=f"give {name} once: drop --{name} or remove it from the --marks file",
+            )
+        marks[name] = value
+    return marks
 
 
 def _default_source() -> str:
@@ -225,6 +309,7 @@ def _emit(payload: dict[str, object], lines: list[str], *, json_mode: bool) -> N
 def cmd_emit(args: argparse.Namespace) -> int:
     json_mode = bool(args.json)
     data = _read_data(args.data)
+    marks = _collect_marks(args)
 
     wire: dict[str, object] = {
         "id": new_event_id(),
@@ -240,9 +325,15 @@ def cmd_emit(args: argparse.Namespace) -> int:
         wire["causationId"] = args.causation_id
     if args.run_id is not None:
         wire["runId"] = args.run_id
+    wire.update(marks)
 
     try:
         envelope = Envelope.from_dict(wire)
+        # from_dict is read-tolerant of marks outside the vocabulary; emit is a
+        # producer and must be write-strict, so check membership explicitly.
+        unknown = envelope.unknown_marks()
+        if unknown:
+            raise EnvelopeValidationError(list(unknown))
     except EnvelopeValidationError as exc:
         # str(exc) already lists every field-level reason (see
         # EnvelopeValidationError.__str__), so nothing is lost by folding it
@@ -327,6 +418,33 @@ def register(sub: argparse._SubParsersAction) -> None:
         metavar="ID",
         default=None,
         help="Groups every event of one pipeline run together.",
+    )
+    p.add_argument(
+        "--visibility",
+        metavar="WORD",
+        default=None,
+        help="Content mark: who may see this event (private, public).",
+    )
+    p.add_argument(
+        "--origin",
+        metavar="WORD",
+        default=None,
+        help="Content mark: who produced the content (human, ai, code, mixed).",
+    )
+    p.add_argument(
+        "--fidelity",
+        metavar="WORD",
+        default=None,
+        help="Content mark: how faithful the content is (verbatim, transcribed, generated, "
+        "computed).",
+    )
+    p.add_argument(
+        "--marks",
+        metavar="FILE",
+        default=None,
+        help="Path to a JSON object holding any of visibility, origin, fidelity, timestamps "
+        "(the only way to set timestamps). A file path only: '-' is refused. A mark may not "
+        "also be given by its flag.",
     )
     p.add_argument("--json", action="store_true", help="Emit structured JSON.")
     p.set_defaults(func=cmd_emit)
