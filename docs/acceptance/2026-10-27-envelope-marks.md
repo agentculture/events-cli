@@ -18,7 +18,7 @@ rests on a judgment call (h1).
 
 | Gate | Result |
 |------|--------|
-| `uv run pytest -n auto` (default selection) | 816 passed |
+| `uv run pytest -n auto` (default selection) | 817 passed |
 | `EVENTS_STACK_IT=1 uv run pytest -m stack` | 14 passed, 1 skipped (`EVENTS_TEST_BROKER` not set; pre-existing) |
 | `black --check`, `isort --check-only`, `flake8`, `bandit` | clean |
 | `markdownlint-cli2 "**/*.md" …` | 0 errors |
@@ -28,6 +28,11 @@ One defect was caught by this gate rather than by the task agent: the t6 stack
 test published before `EventClient`'s background connection was up
 (`no_conn`). The agent had been told not to touch a broker; the merge-gate run
 found it and `f7b7a38` waits for the connection.
+
+A read-only `ask-colleague review` of the branch then found two more, both
+fixed in `c6fb867`: the explain catalog said an `emit` flag overrides the same
+key in `--marks` (it is refused), and a malformed timestamp mapping skipped its
+value checks, under-reporting defects.
 
 ## #15's acceptance criteria
 
