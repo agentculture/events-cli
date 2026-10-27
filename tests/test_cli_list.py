@@ -206,3 +206,73 @@ def test_get_and_list_run_with_paho_absent(tmp_path: Path) -> None:
     )
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert "GET_LIST_NO_PAHO_OK" in proc.stdout
+
+
+# --- content marks (#15) ----------------------------------------------------
+
+_MARKED = dict(
+    visibility="private",
+    origin="human",
+    fidelity="transcribed",
+    timestamps=[
+        {"type": "recorded", "at": "2026-07-24T10:00:00Z"},
+        {"type": "transcribed", "at": "2026-07-24T10:01:00Z", "by": "client"},
+    ],
+)
+
+
+def _seed_envelope(root: Path, envelope: Envelope, sub: str = "robot") -> None:
+    HistoryStore(root).append(envelope, sub)
+
+
+def test_list_text_line_for_an_unmarked_event_is_unchanged(
+    isolated_history: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    envelope = Envelope.new("task.requested", "agent://builder")
+    _seed_envelope(isolated_history, envelope)
+
+    assert main(["list"]) == 0
+
+    assert capsys.readouterr().out == (f"task.requested  id={envelope.id}  seq=1  sub=robot\n")
+
+
+def test_list_text_line_shows_marks(
+    isolated_history: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    envelope = Envelope.new("task.requested", "agent://builder", **_MARKED)
+    _seed_envelope(isolated_history, envelope)
+
+    assert main(["list"]) == 0
+
+    assert capsys.readouterr().out == (
+        f"task.requested  id={envelope.id}  seq=1  sub=robot  "
+        "[visibility=private origin=human fidelity=transcribed "
+        "times=published,recorded,transcribed]\n"
+    )
+
+
+def test_list_text_line_flags_an_unrecognised_mark(
+    isolated_history: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    envelope = Envelope.from_dict(
+        {**Envelope.new("task.requested", "agent://builder").to_dict(), "origin": "robot"}
+    )
+    _seed_envelope(isolated_history, envelope)
+
+    assert main(["list"]) == 0
+
+    out = capsys.readouterr().out
+    assert "origin=robot(unrecognised)" in out
+    assert "visibility" not in out
+
+
+def test_list_json_carries_marks_exactly_as_the_envelope_emits_them(
+    isolated_history: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    envelope = Envelope.new("task.requested", "agent://builder", **_MARKED)
+    _seed_envelope(isolated_history, envelope)
+
+    assert main(["list", "--json"]) == 0
+
+    event = json.loads(capsys.readouterr().out)["events"][0]["event"]
+    assert event == envelope.to_dict()

@@ -40,9 +40,37 @@ import argparse
 
 from events_cli.cli._errors import EXIT_ENV_ERROR, EXIT_USER_ERROR, CliError
 from events_cli.cli._output import emit_result
+from events_cli.core import Envelope
+from events_cli.core.envelope import MARK_VOCABULARIES
 from events_cli.history import DEFAULT_MAX, HistoryError, open_store
 
 __all__ = ["cmd_list", "register"]
+
+
+def marks_suffix(envelope: Envelope) -> str:
+    """The human-readable marks of ``envelope``, or ``""`` when it has none.
+
+    Shared by ``events list`` and ``events watch`` so both verbs spell marks
+    identically: ``  [visibility=private origin=human times=published,recorded]``.
+    A mark outside the current vocabulary (preserved verbatim on read) is
+    suffixed ``(unrecognised)``; the vocabulary itself lives in the core, and
+    this only asks ``unknown_marks()`` which fields it rejects. ``published``
+    stands for the envelope's own ``time`` and leads the timestamp types.
+    """
+    unknown = {err.field for err in envelope.unknown_marks()}
+    parts = []
+    for mark in MARK_VOCABULARIES:
+        value = getattr(envelope, mark)
+        if value is not None:
+            flag = "(unrecognised)" if mark in unknown else ""
+            parts.append(f"{mark}={value}{flag}")
+    if envelope.timestamps:
+        types = ["published"]
+        for index, item in enumerate(envelope.timestamps):
+            flag = "(unrecognised)" if f"timestamps[{index}].type" in unknown else ""
+            types.append(f"{getattr(item, 'type', '?')}{flag}")
+        parts.append("times=" + ",".join(types))
+    return f"  [{' '.join(parts)}]" if parts else ""
 
 
 def _emit(payload: dict[str, object], lines: list[str], *, json_mode: bool) -> None:
@@ -77,7 +105,7 @@ def cmd_list(args: argparse.Namespace) -> int:
     if records:
         lines = [
             f"{record.envelope.type}  id={record.envelope.id}  "
-            f"seq={record.seq}  sub={record.subscription}"
+            f"seq={record.seq}  sub={record.subscription}" + marks_suffix(record.envelope)
             for record in records
         ]
     else:
