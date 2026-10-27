@@ -9,6 +9,7 @@ particular never the host's 1883).
 
 from __future__ import annotations
 
+import json
 import os
 import socket
 import subprocess
@@ -123,6 +124,48 @@ def test_publish_event_serialises_the_envelope_wire_form(
     assert seen["payload"] == env.to_json()
     assert seen["qos"] == 0
     assert seen["retain"] is False
+
+
+def test_publish_event_carries_content_marks_unchanged(
+    dead_port: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The four content marks reach the broker payload with their exact values.
+
+    The payload is the envelope's own wire form, so a mark that is dropped or
+    re-cased on the way out would be a silent loss for every consumer.
+    """
+    import paho.mqtt.client as mqtt
+
+    env = Envelope.new(
+        "task.requested",
+        "agent://builder",
+        data={"n": 1},
+        visibility="private",
+        origin="human",
+        fidelity="transcribed",
+        timestamps=[
+            {"type": "recorded", "at": "2026-10-27T09:00:00Z", "by": "client"},
+            {"type": "transcribed", "at": "2026-10-27T09:00:02Z"},
+        ],
+    )
+    seen: dict = {}
+
+    def spy(topic, payload=None, qos=0, retain=False, properties=None):
+        seen.update(topic=topic, payload=payload, qos=qos, retain=retain)
+        return mqtt.MQTTMessageInfo(1)
+
+    with EventClient("127.0.0.1", dead_port) as client:
+        monkeypatch.setattr(client._paho, "publish", spy)
+        client.publish_event(env, "events/task/requested")
+    assert seen["payload"] == env.to_json()
+    wire = json.loads(seen["payload"])
+    assert wire["visibility"] == "private"
+    assert wire["origin"] == "human"
+    assert wire["fidelity"] == "transcribed"
+    assert wire["timestamps"] == [
+        {"type": "recorded", "at": "2026-10-27T09:00:00Z", "by": "client"},
+        {"type": "transcribed", "at": "2026-10-27T09:00:02Z"},
+    ]
 
 
 # --- the qos=1 behaviour change (q3): publish_event only, publish untouched --

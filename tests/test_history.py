@@ -35,7 +35,13 @@ from pathlib import Path
 
 import pytest
 
-from events_cli.core import Envelope, EnvelopeValidationError, EventsError, new_event_id
+from events_cli.core import (
+    Envelope,
+    EnvelopeValidationError,
+    EventsError,
+    Timestamp,
+    new_event_id,
+)
 from events_cli.history import (
     DEFAULT_MAX,
     HISTORY_DIR_ENV,
@@ -1132,3 +1138,48 @@ def test_the_introspection_lane_does_not_import_the_store() -> None:
 def test_the_new_event_id_helper_is_still_the_ids_under_test() -> None:
     """Guard the premise: the ids these tests reason about are the real ones."""
     assert timestamp_part(new_event_id()).isalnum()
+
+
+def test_a_record_without_content_marks_reads_back_with_every_mark_none(
+    store: HistoryStore,
+) -> None:
+    """An unmarked envelope is still a valid record; the marks read back as None."""
+    envelope = event(1)
+    store.append(envelope, "builder")
+    record = store.get(envelope.id)
+    assert record is not None
+    assert record.envelope.visibility is None
+    assert record.envelope.origin is None
+    assert record.envelope.fidelity is None
+    assert record.envelope.timestamps is None
+
+
+def test_a_marked_envelope_round_trips_its_content_marks_through_the_store(
+    store: HistoryStore,
+) -> None:
+    """All four marks survive append then read-back, timestamps as Timestamp tuples."""
+    envelope = Envelope.new(
+        "task.requested",
+        "agent://builder",
+        data={"n": 1},
+        visibility="private",
+        origin="human",
+        fidelity="transcribed",
+        timestamps=[
+            {"type": "recorded", "at": "2026-10-27T09:00:00Z", "by": "client"},
+            {"type": "transcribed", "at": "2026-10-27T09:00:02Z"},
+        ],
+    )
+    store.append(envelope, "builder")
+    record = store.get(envelope.id)
+    assert record is not None
+    stored = record.envelope
+    assert stored.visibility == "private"
+    assert stored.origin == "human"
+    assert stored.fidelity == "transcribed"
+    assert isinstance(stored.timestamps, tuple)
+    assert stored.timestamps == (
+        Timestamp(type="recorded", at="2026-10-27T09:00:00Z", by="client"),
+        Timestamp(type="transcribed", at="2026-10-27T09:00:02Z"),
+    )
+    assert stored == envelope
