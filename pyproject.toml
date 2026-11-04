@@ -1,6 +1,6 @@
 [project]
 name = "events-cli"
-version = "0.10.0"
+version = "0.10.1"
 description = "Agent and CLI that runs and maintains a Dockerised Eclipse Mosquitto MQTT broker and defines what the events on it mean — a CloudEvents envelope core, an importable publish client, and stack verbs — so an app can import it and an agent or a human can publish events the same way."
 readme = "README.md"
 license = "Apache-2.0"

@@ -691,6 +691,75 @@ def test_a_complete_record_that_missed_its_commit_marker_is_recovered(
     ]
 
 
+def zero_filled_index_tail(store: HistoryStore, sub: str, entries: int = 2) -> None:
+    """What a crash can leave: zero-filled blocks past the last real index entry."""
+    with index_path(store, sub).open("ab") as handle:
+        handle.write(b"\0" * struct.calcsize("<QQ") * entries)
+
+
+def test_a_zero_filled_index_tail_is_invisible_to_readers(store: HistoryStore) -> None:
+    for n in range(3):
+        store.append(event(n), "builder")
+    zero_filled_index_tail(store, "builder")
+    page = HistoryStore(store.root).read("builder", since=0, max=10)
+    assert [record.seq for record in page.records] == [1, 2, 3]
+
+
+def test_a_zero_filled_index_tail_does_not_move_the_cursor(store: HistoryStore) -> None:
+    for n in range(3):
+        store.append(event(n), "builder")
+    zero_filled_index_tail(store, "builder")
+    assert HistoryStore(store.root).read("builder", since=3, max=10).cursor == 3
+
+
+def test_recovery_removes_a_zero_filled_index_tail_without_reindexing(
+    store: HistoryStore,
+) -> None:
+    for n in range(3):
+        store.append(event(n), "builder")
+    good = index_entries(store, "builder")
+    zero_filled_index_tail(store, "builder")
+    reopened = HistoryStore(store.root)
+    reopened.append(event(3), "builder")
+    assert index_entries(store, "builder")[:3] == good
+    assert len(index_entries(store, "builder")) == 4
+
+
+def test_the_next_append_after_a_zero_filled_tail_takes_the_next_sequence(
+    store: HistoryStore,
+) -> None:
+    for n in range(3):
+        store.append(event(n), "builder")
+    zero_filled_index_tail(store, "builder")
+    assert HistoryStore(store.root).append(event(3), "builder") == 4
+
+
+def test_every_record_reads_back_after_recovering_a_zero_filled_tail(
+    store: HistoryStore,
+) -> None:
+    for n in range(3):
+        store.append(event(n), "builder")
+    zero_filled_index_tail(store, "builder")
+    reopened = HistoryStore(store.root)
+    reopened.append(event(3), "builder")
+    page = reopened.read("builder", since=0, max=10)
+    assert [record.seq for record in page.records] == [1, 2, 3, 4]
+
+
+def test_an_index_of_only_zero_entries_is_rebuilt_from_the_log(store: HistoryStore) -> None:
+    store.append(event(0), "builder")
+    index_path(store, "builder").write_bytes(b"\0" * struct.calcsize("<QQ") * 2)
+    assert HistoryStore(store.root).append(event(1), "builder") == 2
+
+
+def test_the_damage_hint_warns_that_deleting_restarts_sequences(store: HistoryStore) -> None:
+    store.append(event(0), "builder")
+    log_path(store, "builder").write_bytes(b"not json\n")
+    with pytest.raises(HistoryCorruptError) as caught:
+        store.read("builder", since=0, max=1)
+    assert "restarts sequences at 1" in caught.value.remediation
+
+
 def test_a_recovered_record_is_still_deduped(store: HistoryStore) -> None:
     """Recovery restores dedupe, so a redelivery of the orphan is a no-op."""
     envelopes = [event(n) for n in range(2)]
