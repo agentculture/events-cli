@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2026-11-04
+
+### Fixed
+
+- History recovery no longer duplicates the whole index after a crash leaves zero-filled entries at its end, which made a subscription unreadable (`record claims sequence 1`). An all-zero entry was never a commit: readers do not count it and recovery removes it. The damage hint now warns that deleting a subscription directory restarts sequences at 1, so a consumer holding a cursor skips new events.
+
 ## [0.10.0] - 2026-07-24
 
 ### Added

@@ -39,7 +39,10 @@ Recovery runs in the write path, under the lock, and only ever decides the fate
 of the *uncommitted* tail; committed records are never touched. A complete,
 parseable record found beyond the index is committed (it was fully written; the
 crash merely beat the marker). Anything left over — a torn line, or bytes that
-do not parse — is truncated away, because nothing has ever read it. Sidecar
+do not parse — is truncated away, because nothing has ever read it. A crash can
+also leave zero-filled blocks at the end of ``index.bin``. A real entry always
+spans at least one byte, so an all-zero entry was never a commit: readers do not
+count them, and recovery removes them. Sidecar
 rewrites go through a temp sibling plus :func:`os.replace`, so a crash during a
 rebuild leaves the previous sidecar intact.
 
@@ -143,8 +146,26 @@ class JsonlBackend:
             return 0
 
     def _count(self, sub: str) -> int:
-        """How many records are **committed** for ``sub``."""
-        return self._size(self._index(sub)) // _ENTRY_WIDTH
+        """How many records are **committed** for ``sub``.
+
+        Trailing all-zero index entries are not commits (see the module doc), so a
+        reader never hands out a cursor past them.
+        """
+        entries = self._size(self._index(sub)) // _ENTRY_WIDTH
+        return entries - self._zeroed_tail(sub, entries)
+
+    def _zeroed_tail(self, sub: str, entries: int) -> int:
+        """How many of the last of ``entries`` index entries are all zero."""
+        if entries == 0:
+            return 0
+        zeroed = 0
+        with self._index(sub).open("rb") as handle:
+            while zeroed < entries:
+                handle.seek((entries - zeroed - 1) * _ENTRY_WIDTH)
+                if any(handle.read(_ENTRY_WIDTH)):
+                    break
+                zeroed += 1
+        return zeroed
 
     # -- the append path ---------------------------------------------------
 
@@ -306,6 +327,13 @@ class JsonlBackend:
         if ragged:  # half an index entry survived the crash
             os.truncate(index, size - ragged)
             size -= ragged
+
+        # Read as the last entry, a zero-filled one would make committed_end 0 and
+        # the whole log look uncommitted, so every record would be indexed again.
+        committed = self._count(sub) * _ENTRY_WIDTH
+        if committed != size:
+            os.truncate(index, committed)
+            size = committed
 
         committed_end = self._entry(sub, size // _ENTRY_WIDTH - 1)[1] if size else 0
         log_size = self._size(self._log(sub))
@@ -500,6 +528,7 @@ class JsonlBackend:
 
 def _repair_hint(log: Path) -> str:
     return (
-        f"inspect {log}; the record is damaged on disk. Delete the subscription's "
-        "directory to discard its history, or restore the file from a backup"
+        f"inspect {log}; the record is damaged on disk. Restore the file from a backup, "
+        "or delete the subscription's directory to discard its history. Deleting restarts "
+        "sequences at 1, so a consumer holding a cursor must reset it or it skips new events"
     )
